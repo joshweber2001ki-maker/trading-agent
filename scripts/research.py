@@ -12,6 +12,7 @@ Usage:
 import os
 import sys
 import json
+import re
 import requests
 
 PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY", "")
@@ -48,6 +49,41 @@ def _ask(prompt, model="sonar"):
     citations = data.get("citations", [])
     return content, citations
 
+def _extract_json(content):
+    """Robustly extract JSON from a string that may contain markdown fences or prose.
+
+    Strategy:
+    1. Strip a wrapping ```json ... ``` or ``` ... ``` fence if present.
+    2. Scan for the first { or [ and slice from there to the matching last } or ].
+    3. Return the parsed object, or None on failure.
+    """
+    text = content.strip()
+
+    # Remove markdown code fences (```json ... ``` or ``` ... ```)
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
+    text = text.strip()
+
+    # Find the outermost JSON object or array
+    start = next((i for i, c in enumerate(text) if c in "{["), None)
+    if start is None:
+        return None
+
+    opener = text[start]
+    closer = "}" if opener == "{" else "]"
+    end = len(text) - 1
+    while end >= start and text[end] != closer:
+        end -= 1
+
+    if end < start:
+        return None
+
+    try:
+        return json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+
+
 def news_for_symbol(symbol):
     """Get latest news and sentiment for a stock symbol."""
     prompt = f"""
@@ -66,14 +102,12 @@ Research {symbol} stock RIGHT NOW. Return JSON with this exact structure:
 Return ONLY the JSON, no extra text.
 """
     content, citations = _ask(prompt)
-    try:
-        # Strip any markdown fences if present
-        clean = content.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        result = json.loads(clean)
+    result = _extract_json(content)
+    if result is not None:
         result["citations"] = citations[:3]
         print(json.dumps(result, indent=2))
-    except json.JSONDecodeError:
-        print(json.dumps({"symbol": symbol, "raw": content, "citations": citations}))
+    else:
+        print(json.dumps({"symbol": symbol, "parse_error": True, "raw": content, "citations": citations}))
 
 def macro_overview():
     """Get current macro market overview."""
@@ -94,13 +128,12 @@ Give me a current macro market overview. Return JSON:
 Return ONLY the JSON.
 """
     content, citations = _ask(prompt)
-    try:
-        clean = content.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        result = json.loads(clean)
+    result = _extract_json(content)
+    if result is not None:
         result["citations"] = citations[:3]
         print(json.dumps(result, indent=2))
-    except json.JSONDecodeError:
-        print(json.dumps({"raw": content, "citations": citations}))
+    else:
+        print(json.dumps({"parse_error": True, "raw": content, "citations": citations}))
 
 def sentiment_multi(symbols):
     """Quick sentiment scan for multiple symbols."""
@@ -117,12 +150,13 @@ Return a JSON array where each element is:
 Return ONLY the JSON array.
 """
     content, citations = _ask(prompt)
-    try:
-        clean = content.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        result = json.loads(clean)
-        print(json.dumps({"results": result, "citations": citations[:3]}, indent=2))
-    except json.JSONDecodeError:
-        print(json.dumps({"raw": content}))
+    result = _extract_json(content)
+    if result is not None:
+        # Accept both a bare array and {"results": [...]}
+        items = result if isinstance(result, list) else result.get("results", result)
+        print(json.dumps({"results": items, "citations": citations[:3]}, indent=2))
+    else:
+        print(json.dumps({"parse_error": True, "raw": content}))
 
 def upcoming_events():
     """Get upcoming macro events that could move markets."""
@@ -143,13 +177,12 @@ Return JSON:
 Return ONLY the JSON.
 """
     content, citations = _ask(prompt)
-    try:
-        clean = content.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        result = json.loads(clean)
+    result = _extract_json(content)
+    if result is not None:
         result["citations"] = citations[:3]
         print(json.dumps(result, indent=2))
-    except json.JSONDecodeError:
-        print(json.dumps({"raw": content}))
+    else:
+        print(json.dumps({"parse_error": True, "raw": content}))
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
