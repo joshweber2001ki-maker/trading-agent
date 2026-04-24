@@ -1,0 +1,39 @@
+{
+  "routines": [
+    {
+      "name": "1_PreMarket_Research",
+      "schedule": "25 9 * * 1-5",
+      "timezone": "America/New_York",
+      "prompt": "Run the PRE-MARKET RESEARCH routine as defined in CLAUDE.md.\n\n1. First run: python scripts/alpaca.py market_status — if market is closed today, log that to journal and STOP.\n2. Run: python scripts/research.py macro — get overall market sentiment.\n3. Run: python scripts/research.py events — identify any high-risk events in next 14 days.\n4. Read memory/watchlist.json to get all symbols.\n5. For each symbol in the watchlist, run: python scripts/research.py news SYMBOL\n6. Flag any symbols with earnings/FDA/macro events in the next 5 days as HIGH RISK.\n7. Read memory/strategy.md for any notes from previous sessions.\n8. Create today's journal file at journal/YYYY-MM-DD.md (use actual date).\n9. Write a structured Research section to the journal with: macro overview, symbol-by-symbol findings, high-risk flags, and your pre-market bias (bullish/bearish/neutral).",
+      "allowed_tools": ["bash", "read", "write"]
+    },
+    {
+      "name": "2_MarketOpen_Execution",
+      "schedule": "0 10 * * 1-5",
+      "timezone": "America/New_York",
+      "prompt": "Run the MARKET OPEN EXECUTION routine as defined in CLAUDE.md.\n\n1. Run: python scripts/alpaca.py market_status — confirm market is open. If not, log and stop.\n2. Read today's journal file (journal/YYYY-MM-DD.md) for research findings.\n3. Run: python scripts/alpaca.py account — check portfolio value and cash.\n4. Run: python scripts/alpaca.py positions — review all open positions.\n5. Run: python scripts/guardrails.py portfolio — if FAILED, log reason and do NOT trade today.\n6. Run: python scripts/guardrails.py stop_check — if any stops triggered, execute SELL orders immediately for those symbols.\n7. For each symbol in memory/watchlist.json:\n   a. Run: python scripts/alpaca.py bars SYMBOL 50\n   b. Based on bars data + research from journal, decide: BUY / SELL / HOLD / SKIP\n   c. If BUY or SELL: run python scripts/guardrails.py trade SIDE SYMBOL QTY PRICE\n   d. Only if guardrails PASSED: run python scripts/alpaca.py order SIDE SYMBOL QTY PRICE\n8. Calculate position size: never more than 10% of portfolio per position. Use limit orders only.\n9. Write all decisions (including HOLD and SKIP with reasons) to journal under ## Execution.",
+      "allowed_tools": ["bash", "read", "write"]
+    },
+    {
+      "name": "3_Midday_Scan",
+      "schedule": "0 13 * * 1-5",
+      "timezone": "America/New_York",
+      "prompt": "Run the MIDDAY SCAN routine as defined in CLAUDE.md.\n\n1. Run: python scripts/alpaca.py market_status — confirm market is open.\n2. Run: python scripts/guardrails.py stop_check — check ALL positions for stop-loss triggers.\n3. For any triggered stops: immediately run python scripts/alpaca.py order SELL SYMBOL QTY CURRENT_PRICE\n4. Run: python scripts/alpaca.py open_orders — check for unfilled orders from this morning.\n5. For any orders older than 2 hours that are still open: run python scripts/alpaca.py cancel ORDER_ID\n6. Run: python scripts/research.py macro — check if any major news broke since morning.\n7. If macro sentiment has materially shifted (e.g. from bullish to bearish), consider tightening stops or reducing exposure.\n8. Run: python scripts/alpaca.py positions — update on current P&L.\n9. Write a concise Midday section to today's journal.",
+      "allowed_tools": ["bash", "read", "write"]
+    },
+    {
+      "name": "4_EndOfDay_Summary",
+      "schedule": "15 16 * * 1-5",
+      "timezone": "America/New_York",
+      "prompt": "Run the END OF DAY SUMMARY routine as defined in CLAUDE.md.\n\n1. Run: python scripts/alpaca.py account — get final portfolio value.\n2. Run: python scripts/alpaca.py positions — get all current positions.\n3. Run: python scripts/alpaca.py open_orders — cancel any remaining open orders that did not fill today.\n4. Calculate today's P&L by comparing current equity to yesterday's close (use journal if available).\n5. Review all trades placed today from the journal's Execution section.\n6. Assess quality of each decision: was it correct? Why or why not?\n7. Identify ONE key lesson from today.\n8. If you learned something that should change future behavior, update memory/strategy.md.\n9. Write the End of Day section to today's journal with: final portfolio value, P&L, trade count, win/loss, and key lesson.",
+      "allowed_tools": ["bash", "read", "write"]
+    },
+    {
+      "name": "5_Friday_WeeklyReview",
+      "schedule": "0 17 * * 5",
+      "timezone": "America/New_York",
+      "prompt": "Run the FRIDAY WEEKLY REVIEW routine as defined in CLAUDE.md.\n\n1. Read all journal files from this week (journal/YYYY-MM-DD.md for Mon-Fri).\n2. Aggregate total weekly P&L from all End of Day summaries.\n3. Calculate win rate: number of profitable trades / total trades.\n4. List the top 3 BEST decisions this week and why they worked.\n5. List the top 3 WORST decisions this week and what went wrong.\n6. Review the current watchlist in memory/watchlist.json — any symbols to add or remove based on performance and research?\n7. If making watchlist changes, write the updated watchlist back to memory/watchlist.json.\n8. Review memory/strategy.md — any patterns emerging? Update with weekly insights.\n9. Run: python scripts/research.py macro — what is the macro backdrop for NEXT week?\n10. Write a comprehensive Weekly Review section to today's journal file.",
+      "allowed_tools": ["bash", "read", "write"]
+    }
+  ]
+}
