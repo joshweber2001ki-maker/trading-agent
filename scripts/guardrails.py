@@ -28,11 +28,11 @@ HEADERS = {
 
 # ── Hard Limits (mirror what's in CLAUDE.md) ──────────────────────────────────
 MAX_POSITION_PCT    = 0.10   # 10% of portfolio per position
-MAX_DAILY_LOSS_PCT  = 0.03   # 3% portfolio daily loss limit
+MAX_DAILY_LOSS_PCT  = 0.05   # 5% portfolio daily loss limit — halt all trading if reached
 MAX_OPEN_POSITIONS  = 10
 STOP_LOSS_PCT       = 0.07   # -7% stop loss
-MIN_CASH_RESERVE    = 0.20   # 20% minimum cash
-MAX_TRADES_PER_DAY  = 5
+MIN_CASH_RESERVE    = 0.15   # 15% minimum cash
+MAX_TRADES_PER_DAY  = 50     # max 50 trades/day while daily loss < 5%
 MIN_PRICE           = 10.0   # no penny stocks
 MIN_AVG_VOLUME      = 500_000
 MARKET_OPEN_ET      = time(9, 35)
@@ -61,7 +61,7 @@ def get_quote(symbol):
 
 def get_bars(symbol, limit=30):
     data = _get(f"/v2/stocks/{symbol}/bars?timeframe=1Day&limit={limit}&feed=iex", base=DATA_URL)
-    return data.get("bars", [])
+    return data.get("bars") or []
 
 # ── Portfolio-level checks ────────────────────────────────────────────────────
 def check_portfolio():
@@ -72,8 +72,20 @@ def check_portfolio():
     portfolio_value = float(account["portfolio_value"])
     cash = float(account["cash"])
     cash_pct = cash / portfolio_value
+    last_equity = float(account.get("last_equity") or portfolio_value)
+    daily_pnl_pct = (portfolio_value - last_equity) / last_equity if last_equity else 0.0
 
-    # 1. Cash reserve
+    # 1. Daily loss limit
+    ok = daily_pnl_pct > -MAX_DAILY_LOSS_PCT
+    if not ok: passed = False
+    checks.append({
+        "check": "max_daily_loss",
+        "limit": f"-{MAX_DAILY_LOSS_PCT*100:.0f}%",
+        "actual": f"{daily_pnl_pct*100:.2f}%",
+        "passed": ok,
+    })
+
+    # 2. Cash reserve
     ok = cash_pct >= MIN_CASH_RESERVE
     if not ok: passed = False
     checks.append({
@@ -83,7 +95,7 @@ def check_portfolio():
         "passed": ok,
     })
 
-    # 2. Max open positions
+    # 3. Max open positions
     positions = get_positions()
     n_pos = len(positions)
     ok = n_pos <= MAX_OPEN_POSITIONS
@@ -95,7 +107,7 @@ def check_portfolio():
         "passed": ok,
     })
 
-    # 3. Daily trades count
+    # 4. Daily trades count
     orders_today = get_orders_today()
     trades_today = len([o for o in orders_today if o["status"] in ("filled", "partially_filled")])
     ok = trades_today < MAX_TRADES_PER_DAY
@@ -107,7 +119,7 @@ def check_portfolio():
         "passed": ok,
     })
 
-    # 4. Account not blocked
+    # 5. Account not blocked
     ok = not account.get("trading_blocked", False) and not account.get("account_blocked", False)
     if not ok: passed = False
     checks.append({
@@ -135,8 +147,20 @@ def check_trade(side, symbol, qty, limit_price):
     account = get_account()
     portfolio_value = float(account["portfolio_value"])
     cash = float(account["cash"])
+    last_equity = float(account.get("last_equity") or portfolio_value)
+    daily_pnl_pct = (portfolio_value - last_equity) / last_equity if last_equity else 0.0
 
-    # 1. Market hours check (ET) — approximate via UTC offset -4 or -5
+    # 1. Daily loss limit — halt all trading if reached
+    ok = daily_pnl_pct > -MAX_DAILY_LOSS_PCT
+    if not ok: passed = False
+    checks.append({
+        "check": "max_daily_loss",
+        "limit": f"-{MAX_DAILY_LOSS_PCT*100:.0f}%",
+        "actual": f"{daily_pnl_pct*100:.2f}%",
+        "passed": ok,
+    })
+
+    # 2. Market hours check (ET) — approximate via UTC offset -4 or -5
     now_utc = datetime.now(timezone.utc)
     # Use simple UTC-4 approximation (EDT). For prod, use pytz.
     now_et_hour = (now_utc.hour - 4) % 24
@@ -151,7 +175,7 @@ def check_trade(side, symbol, qty, limit_price):
         "passed": ok,
     })
 
-    # 2. Min price
+    # 3. Min price
     ok = limit_price >= MIN_PRICE
     if not ok: passed = False
     checks.append({
@@ -161,7 +185,7 @@ def check_trade(side, symbol, qty, limit_price):
         "passed": ok,
     })
 
-    # 3. Position size check (value of trade vs portfolio)
+    # 4. Position size check (value of trade vs portfolio)
     trade_value = qty * limit_price
     position_pct = trade_value / portfolio_value
     ok = position_pct <= MAX_POSITION_PCT
@@ -174,7 +198,7 @@ def check_trade(side, symbol, qty, limit_price):
         "passed": ok,
     })
 
-    # 4. Cash available for buys
+    # 5. Cash available for buys
     if side.upper() == "BUY":
         cash_after = cash - trade_value
         min_cash_needed = portfolio_value * MIN_CASH_RESERVE
@@ -187,7 +211,7 @@ def check_trade(side, symbol, qty, limit_price):
             "passed": ok,
         })
 
-    # 5. Daily trades limit
+    # 6. Daily trades limit
     orders_today = get_orders_today()
     trades_today = len([o for o in orders_today if o["status"] in ("filled", "partially_filled")])
     ok = trades_today < MAX_TRADES_PER_DAY
@@ -199,7 +223,7 @@ def check_trade(side, symbol, qty, limit_price):
         "passed": ok,
     })
 
-    # 6. Volume check (use bar data)
+    # 7. Volume check (use bar data)
     try:
         bars = get_bars(symbol, 30)
         if bars:

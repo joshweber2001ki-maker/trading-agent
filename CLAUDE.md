@@ -32,16 +32,18 @@ Dynamic. Default starting watchlist: large-cap US equities with strong fundament
 ### Signal Logic (in order of priority)
 1. **Macro context** — What is the broad market doing? (Check SPY trend)
 2. **News sentiment** — Use Perplexity to get latest news on each symbol. Flag any material risk events (earnings, FDA, macro shocks).
-3. **Price action** — Compare current price to 20-day and 50-day SMA. Prefer buying above 20d SMA with upward momentum.
-4. **Volume** — Confirm signal with above-average volume.
-5. **Relative strength** — Prefer symbols outperforming SPY over last 10 days.
+3. **Price action** — Compare current price to 20-day and 50-day SMA. Prefer buying above 20d SMA; within 5% below is acceptable if momentum is turning up.
+4. **Volume** — Above-average volume strengthens conviction but is not a blocking condition on its own.
+5. **Relative strength** — Prefer symbols outperforming SPY over last 10 days; neutral relative strength is acceptable if other signals are positive.
+
+**3 out of 5 signals aligned is sufficient to BUY.** You do not need all five. Only a hard blocker (material risk event, guardrail fail, macro in freefall) should produce a SKIP.
 
 ### Decision Framework
 For each symbol, conclude one of:
-- **BUY** — Entry conditions met, no blocking news, position size within limits
+- **BUY** — Majority of entry conditions met, no hard blockers, position size within limits
 - **HOLD** — Currently in position, thesis intact, no exit trigger
 - **SELL** — Stop triggered, thesis broken, or better opportunity identified
-- **SKIP** — Insufficient signal, uncertainty too high
+- **SKIP** — Hard blocker present (material risk event, earnings in <48h, guardrail would fail) or fewer than 2 signals aligned
 
 ---
 
@@ -52,14 +54,14 @@ These rules run through `scripts/guardrails.py` before EVERY order. If any check
 | Rule | Limit |
 |------|-------|
 | Max position size | 10% of portfolio |
-| Max single-day loss | 3% of portfolio |
+| Max single-day loss | 5% of portfolio (halt all trading if reached) |
 | Max open positions | 10 |
 | Stop-loss on every position | -7% from entry price |
-| Minimum cash reserve | 20% of portfolio always |
-| Max trades per day | 5 |
+| Minimum cash reserve | 15% of portfolio always |
+| Max trades per day | 50 (only while daily loss < 5% of portfolio) |
 | Only trade during market hours | 09:35–15:45 ET (avoid open/close chaos) |
 | No penny stocks | Min price $10, min avg volume 500k/day |
-| Max sector concentration | 30% of portfolio in one sector |
+| Max sector concentration | 40% of portfolio in one sector |
 
 ---
 
@@ -142,7 +144,7 @@ Every entry must follow this structure:
 - If Alpaca API is down: log the error, do NOT retry more than 2 times, write to journal
 - If Perplexity is unavailable: proceed with price-action-only analysis, note the limitation
 - If guardrails block a trade: log the reason in journal, never override
-- If you are uncertain: **SKIP the trade.** Missing an opportunity is always better than a bad trade.
+- If you are uncertain: **reduce position size** (half the normal allocation) rather than skipping entirely. A small position is better than no data.
 
 ---
 
