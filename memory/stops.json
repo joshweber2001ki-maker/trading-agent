@@ -1,0 +1,18 @@
+{
+  "stops": {
+    "META": {
+      "entry_price": 604.93,
+      "current_stop": 600.00,
+      "original_stop": 562.5849,
+      "note": "Raised to $600.00 — near break-even stop given macro headwinds (Middle East tensions, broad market sell-off), price below 20-day SMA, and insider selling detected 2026-05-06",
+      "last_updated": "2026-05-06"
+    },
+    "NVDA": {
+      "entry_price": 203.6825,
+      "current_stop": 196.50,
+      "original_stop": 189.4247,
+      "note": "Raised to $196.50 — trailed stop below April 23 range low ($197.25), protecting against breakdown below recent consolidation support",
+      "last_updated": "2026-05-06"
+    }
+  }
+}
