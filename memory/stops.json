@@ -2,15 +2,17 @@
   "META": {
     "entry_price": 604.93,
     "initial_stop": 562.5849,
-    "current_stop": 562.5849,
-    "highest_price": 612.85,
-    "last_updated": "2026-05-06"
+    "current_stop": 600.00,
+    "highest_price": 613.36,
+    "last_updated": "2026-05-06",
+    "notes": "Raised to $600 (near break-even). Post-earnings stability confirmed; $10B capex red flag noted but sentiment 0.85. Price below SMA20 ~$624; stop prevents meaningful loss if thesis breaks."
   },
   "NVDA": {
     "entry_price": 203.6825,
     "initial_stop": 189.4247,
-    "current_stop": 189.4247,
-    "highest_price": 205.4113,
-    "last_updated": "2026-05-06"
+    "current_stop": 196.50,
+    "highest_price": 205.41,
+    "last_updated": "2026-05-06",
+    "notes": "Raised to $196.50, just below Apr 23 range low of $197.25. Consolidating $197-210 range. 93% analyst buy, $272 avg target. Holding with room to run."
   }
 }
