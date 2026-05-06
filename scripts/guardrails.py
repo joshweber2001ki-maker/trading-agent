@@ -34,9 +34,21 @@ STOP_LOSS_PCT       = 0.07   # -7% stop loss
 MIN_CASH_RESERVE    = 0.15   # 15% minimum cash
 MAX_TRADES_PER_DAY  = 50     # max 50 trades/day while daily loss < 5%
 MIN_PRICE           = 10.0   # no penny stocks
-MIN_AVG_VOLUME      = 500_000
+MIN_AVG_VOLUME      = 75_000   # IEX feed captures ~15% of real volume; 75k ≈ 500k actual
 MARKET_OPEN_ET      = time(9, 35)
 MARKET_CLOSE_ET     = time(15, 45)
+
+STOPS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "memory", "stops.json")
+
+def _load_stops():
+    if os.path.exists(STOPS_FILE):
+        with open(STOPS_FILE) as f:
+            return json.load(f)
+    return {}
+
+def _save_stops(stops):
+    with open(STOPS_FILE, "w") as f:
+        json.dump(stops, f, indent=2)
 
 def _get(endpoint, base=None):
     url = (base or BASE_URL) + endpoint
@@ -251,28 +263,56 @@ def check_trade(side, symbol, qty, limit_price):
     print(json.dumps(result, indent=2))
     return passed
 
-# ── Stop-loss scanner ─────────────────────────────────────────────────────────
+# ── Stop enforcement (read-only — adjustment is done by the agent in routines) ──
 def check_stops():
     positions = get_positions()
+    stops = _load_stops()
     stop_triggers = []
+    today = datetime.now(timezone.utc).date().isoformat()
+    updated = False
+
+    held_symbols = {p["symbol"] for p in positions}
 
     for p in positions:
         symbol = p["symbol"]
         entry = float(p["avg_entry_price"])
         current = float(p["current_price"])
         pnl_pct = (current - entry) / entry
-        stop_level = entry * (1 - STOP_LOSS_PCT)
 
-        triggered = current <= stop_level
+        # Seed stops.json on first encounter — agent will adjust from here
+        if symbol not in stops:
+            stops[symbol] = {
+                "entry_price": entry,
+                "initial_stop": round(entry * (1 - STOP_LOSS_PCT), 4),
+                "current_stop": round(entry * (1 - STOP_LOSS_PCT), 4),
+                "last_updated": today,
+                "note": "initial — agent will adjust based on chart context",
+            }
+            updated = True
+
+        rec = stops[symbol]
+        current_stop = rec["current_stop"]
+        triggered = current <= current_stop
+
         stop_triggers.append({
             "symbol": symbol,
             "entry_price": entry,
             "current_price": current,
             "pnl_pct": round(pnl_pct * 100, 2),
-            "stop_level": round(stop_level, 4),
+            "initial_stop": rec["initial_stop"],
+            "current_stop": current_stop,
             "stop_triggered": triggered,
             "action_required": "SELL NOW" if triggered else "hold",
         })
+
+    # Remove stale entries for closed positions
+    for symbol in list(stops.keys()):
+        if symbol not in held_symbols:
+            del stops[symbol]
+            updated = True
+
+    if updated:
+        _save_stops(stops)
 
     result = {
         "stop_check_time": datetime.now(timezone.utc).isoformat(),
