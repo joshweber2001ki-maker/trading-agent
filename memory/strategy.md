@@ -33,9 +33,11 @@ _Agent will add notes here after each session._
 
 ## Sectors to Favor in Current Environment
 
-**As of 2026-04-24:** Macro is risk-off. Energy is the only leading sector. Broad equities in downtrend. WAIT posture — no sector is favored for new longs until SPY reclaims 50d SMA.
+**As of 2026-05-06:** Macro is CONSTRUCTIVE. SPY trading near ATH above $723, well above SMA20. QQQ also above SMA20 in uptrend. WAIT posture lifted. Favored sectors: Technology (NVDA, GOOGL, MSFT), Communication Services (META — already held). Be selective; size conservatively on first new entries.
 
-**Watch list for first entry when macro improves:** META (strongest recovery, highest analyst conviction), AAPL (above SMA20, defensive tech). MSFT showing distribution — lower priority.
+**Not favored:** Healthcare (UNH under sector pressure), Financials (JPM bearish technicals). TSLA/COST too expensive on fundamentals for new entry.
+
+_Previous note (2026-04-24):_ Macro was risk-off. Energy was the only leading sector. META was flagged as first-entry candidate — entered 2026-05-05 at $604.93.
 
 ---
 
