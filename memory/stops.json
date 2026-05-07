@@ -2,17 +2,17 @@
   "META": {
     "entry_price": 604.93,
     "initial_stop": 562.5849,
-    "current_stop": 600.00,
-    "highest_price": 613.36,
-    "last_updated": "2026-05-06",
-    "notes": "Raised to $600 (near break-even). Post-earnings stability confirmed; $10B capex red flag noted but sentiment 0.85. Price below SMA20 ~$624; stop prevents meaningful loss if thesis breaks."
+    "current_stop": 612.00,
+    "highest_price": 621.01,
+    "last_updated": "2026-05-07",
+    "notes": "Raised from $600 to $612 (just below May 6 session high of $613.36). Price made new recovery high of $621.01 on May 7. Stop now locks in ~$7/share profit. Technically: $612 is below the prior session's high — if META retraces through that level, short-term uptrend is stalling and exit is warranted. Institutional accumulation (Vanguard +3.8%, Fisher +75k shares) and $840 analyst consensus support continued recovery toward old SMA20 zone ($625-$632)."
   },
   "NVDA": {
     "entry_price": 203.6825,
     "initial_stop": 189.4247,
     "current_stop": 196.50,
-    "highest_price": 205.41,
-    "last_updated": "2026-05-06",
-    "notes": "Raised to $196.50, just below Apr 23 range low of $197.25. Consolidating $197-210 range. 93% analyst buy, $272 avg target. Holding with room to run."
+    "highest_price": 207.38,
+    "last_updated": "2026-05-07",
+    "notes": "Stop unchanged at $196.50 (just below Apr 23 swing low $197.25 — key technical reference). Price made new recovery high $207.38. NVDA up 4-5% today on 188M share volume per news. Thesis confirming strongly. Next resistance: $210-$211 (Apr 24 prior range top). Will raise stop only after confirmed break above $211, establishing a new higher range. Avg analyst target $272 — substantial runway remains."
   }
 }
