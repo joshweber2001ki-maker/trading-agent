@@ -57,3 +57,5 @@ _Agent will append lessons here after weekly reviews._
 
 **2026-05-06:** First active buying session post WAIT posture. NVDA BUY executed (24 shares @ $203.97, order f9431ab9). GOOGL and V blocked by guardrail volume check — IEX feed understates true ADV by ~99%. Guardrails respected; no override taken. MSFT skipped due to wide spread + thin volume. Lesson: guardrails.py volume check needs SIP feed or external ADV source — IEX-only volume is not a valid proxy for stock liquidity.
 
+**2026-05-07:** Pre-stating stop raise triggers with explicit conditions before market open (e.g., "will raise NVDA stop after confirmed break above $211") and executing at exactly that level removes hesitation and prevents scope creep. NVDA hit $213.16 — stop raised immediately from $196.50 to $206.50, locking in $67.68 minimum profit on 24 shares. No second-guessing, no "let me wait for more." This is the discipline that compounds. Operationally: the guardrail ADV threshold may have been adjusted (GOOGL and MSFT cleared today where GOOGL was blocked May 6) — confirm guardrails.py threshold on next session.
+

@@ -21,22 +21,22 @@
     "current_stop": 393.92,
     "highest_price": 423.57,
     "last_updated": "2026-05-07",
-    "notes": "New position opened May 7. Initial stop 393.92 = entry x 0.93. Order pending fill at limit $423.57. Guardrails PASSED (5.1% portfolio, ADV 145k, cash reserve OK). Sentiment 0.95, 95% analyst buy, avg target $543-$552. Will reassess stop level at first bars update — consider anchoring to a technically meaningful support level."
+    "notes": "Opened May 7. Fill confirmed at $423.57. Stop 393.92 = entry x 0.93. Closed $421.66 (-0.45%, first-day noise). Apr 27 intraday low $417.12 is natural technical support. Consider anchoring stop near $414-415 once position matures. Ex-dividend May 21 (minor positive)."
   },
   "GOOGL": {
-    "entry_price": 397.85,
+    "entry_price": 397.18,
     "initial_stop": 369.99,
     "current_stop": 369.99,
-    "highest_price": 397.85,
+    "highest_price": 397.92,
     "last_updated": "2026-05-07",
-    "notes": "New position opened May 7. Initial stop 369.99 = entry x 0.93. Order pending fill at limit $397.85. Guardrails PASSED (4.8% portfolio, ADV 154k, cash reserve OK). At new 52-week high $399.85 — bullish momentum. Sentiment 0.86, 86% analyst buy, Morningstar FV $929. Will reassess stop level at first bars update."
+    "notes": "Opened May 7. Actual fill avg $397.18. Stop 369.99 = entry x 0.93. Closed $397.92 at 52-week high zone. Mizuho raised PT to $460 (midday). Thesis intact. Will anchor stop to a technical level once May bars are available."
   },
   "AMZN": {
-    "entry_price": 273.54,
+    "entry_price": 273.50,
     "initial_stop": 254.39,
     "current_stop": 254.39,
     "highest_price": 273.54,
     "last_updated": "2026-05-07",
-    "notes": "New position opened May 7. Initial stop 254.39 = entry x 0.93. Order pending fill at limit $273.54. Guardrails PASSED (4.9% portfolio, ADV 319k, cash reserve OK). Near 52-week high $278.56. Sentiment 0.95, 95% analyst buy, avg target $305.76, Morningstar FV $451. Consumer Discretionary — adds sector diversification."
+    "notes": "Opened May 7. Actual fill avg $273.50. Stop 254.39 (entry x 0.93). Closed $271.44 (-0.75%, first-day noise). Apr 27 intraday low $260.385 is technical support above stop. Near 52-week high $278.56 — upside target intact. Sentiment 0.95, 95% analyst buy."
   }
 }
