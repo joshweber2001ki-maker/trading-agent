@@ -1,50 +1,42 @@
 {
-  "META": {
-    "entry_price": 604.93,
-    "initial_stop": 562.5849,
-    "current_stop": 612.00,
-    "highest_price": 622.28,
-    "last_updated": "2026-05-07",
-    "notes": "Stop at $612 (below May 6 session high of $613.36). Price reached $622.28 at execution session. Approaching SMA20 resistance zone $625-$632. Stop locks in ~$7/share profit. Institutional accumulation (Vanguard +3.8%, Fisher +75k shares) supports thesis. Will reassess after confirmed push through SMA20."
-  },
   "NVDA": {
     "entry_price": 203.6825,
     "initial_stop": 189.4247,
-    "current_stop": 206.50,
-    "highest_price": 214.20,
+    "current_stop": 206.5,
+    "highest_price": 214.96,
     "last_updated": "2026-05-08",
-    "notes": "RAISED STOP: $196.50 → $206.50 (execution session May 7). Price broke above $211 resistance (pre-market target) and reached $213.16. New stop anchored just below Apr 27 intraday swing low of $207.39. Locks in $2.82/share above entry ($67.68 total on 24 shares). Next resistance: $216.54 (Apr 27 close/high) = 52-week high $216.83. Pre-market May 8: price at $214.15, testing resistance band. Will raise stop to $210.00+ after confirmed break AND close above $217."
+    "notes": "RAISED STOP: $196.50 → $206.50 (execution session May 7). Price broke above $211 resistance (pre-market target) and reached $213.16. New stop anchored just below Apr 27 intraday swing low of $207.39. Locks in $2.82/share above entry ($67.68 total on 24 shares). Next resistance: $216.54 (Apr 27 close/high) = 52-week high $216.83. Pre-market May 8: price at $214.15, testing resistance band. Will raise stop to $210.00+ after confirmed break AND close above $217. EOD May 8: closed $214.96 — $217 close trigger NOT fired. Stop unchanged. Held overnight."
   },
   "MSFT": {
     "entry_price": 423.57,
     "initial_stop": 393.92,
     "current_stop": 393.92,
     "highest_price": 423.57,
-    "last_updated": "2026-05-07",
-    "notes": "Opened May 7. Fill confirmed at $423.57. Stop 393.92 = entry x 0.93. Closed $421.66 (-0.45%, first-day noise). Apr 27 intraday low $417.12 is natural technical support. Consider anchoring stop near $414-415 once position matures. Ex-dividend May 21 (minor positive)."
+    "last_updated": "2026-05-08",
+    "notes": "Opened May 7 at $423.57. Stop = entry × 0.93. EOD May 8: closed $414.90 — below $417.12 Apr 27 intraday support for 2nd consecutive session. Thesis intact (95% analyst buy, Morningstar FV $696). Young position (2 days), treating as noise. Consider anchoring stop near $414–415 after further consolidation above that level. Ex-dividend May 21 (minor positive). Priority monitor at open May 11."
   },
   "GOOGL": {
     "entry_price": 397.18,
     "initial_stop": 369.99,
-    "current_stop": 391.00,
-    "highest_price": 400.10,
+    "current_stop": 391.0,
+    "highest_price": 400.14,
     "last_updated": "2026-05-08",
-    "notes": "RAISED STOP: $369.99 → $391.00 (pre-market May 8). GOOGL breaking to confirmed 52-week high $400.10 intraday; pre-market at $402.61. Prior -7% stop was too wide for a stock at breakout highs. $391 sits below the $395 round number and $5.82 below entry, protecting capital if the breakout reverses. Still allows 2-3% intraday variance. Will raise again after confirmed close above $405 with a stop anchored below any emerging consolidation zone."
+    "notes": "RAISED STOP: $369.99 → $391.00 (pre-market May 8). GOOGL hit confirmed 52-week high $400.10. $391 sits below $395 round number, $5.82 below entry. EOD May 8: closed $400.14, holding $400 psychological level. $405 close trigger NOT fired. Will raise again after confirmed close above $405 with stop anchored below any emerging consolidation zone. Held overnight."
   },
   "AMZN": {
-    "entry_price": 273.50,
+    "entry_price": 273.5,
     "initial_stop": 254.39,
     "current_stop": 254.39,
     "highest_price": 273.54,
-    "last_updated": "2026-05-07",
-    "notes": "Opened May 7. Actual fill avg $273.50. Stop 254.39 (entry x 0.93). Closed $271.44 (-0.75%, first-day noise). Apr 27 intraday low $260.385 is technical support above stop. Near 52-week high $278.56 — upside target intact. Sentiment 0.95, 95% analyst buy."
+    "last_updated": "2026-05-08",
+    "notes": "Opened May 7 at avg $273.50. Stop = entry × 0.93. Apr 27 swing low $260.39 = technical support above stop. 52-week high $278.56 = upside target. EOD May 8: closed $272.45, flat. Thesis intact (95% analyst buy, AWS/retail scale). Held overnight."
   },
   "AAPL": {
     "entry_price": 292.86,
     "initial_stop": 272.36,
     "current_stop": 272.36,
-    "highest_price": 292.86,
+    "highest_price": 292.96,
     "last_updated": "2026-05-08",
-    "notes": "Opened May 8. Limit order at $292.86 (order ID: f8053f94-9430-431e-b518-d2099d518547). Initial stop entry x 0.93 = $272.36. 5/5 signals: macro constructive, sentiment 0.75, price 11.6% above SMA20, volume adequate, relative strength outperforming. At confirmed 52-week high ($292.13). Chart data stale (IEX last bar Apr 27 $267.55); nearest prior swing lows $269.66–$271.70 (Apr 23–24) — stop sits just above that zone. Consider tightening toward $285–$288 breakout zone after 1–2 sessions of post-entry price data. Ex-div May 11 ($0.27/share, negligible). Morningstar FV at 222% premium is background flag, not a blocker."
+    "notes": "Opened May 8 at $292.86 limit fill. Stop = entry × 0.93 = $272.36. Aligns with Apr 23–24 swing low cluster $269.66–$271.70. 5/5 signals at entry. EOD May 8: closed $292.96 (+0.04%), flat Day 1. 52-week high breakout confirmed. Ex-div May 11 ($0.27/share, negligible). Consider tightening toward $285–$288 breakout zone after 1–2 more sessions of post-entry price data. Morningstar 222% premium = background flag only. Held overnight."
   }
 }
