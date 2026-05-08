@@ -11,9 +11,9 @@
     "entry_price": 203.6825,
     "initial_stop": 189.4247,
     "current_stop": 206.50,
-    "highest_price": 213.16,
-    "last_updated": "2026-05-07",
-    "notes": "RAISED STOP: $196.50 → $206.50 (execution session May 7). Price broke above $211 resistance (pre-market target) and reached $213.16. New stop anchored just below Apr 27 intraday swing low of $207.39. Locks in $2.82/share above entry ($67.68 total on 24 shares). Next resistance: $216.54 (Apr 27 close/high). Will raise stop again after confirmed break above $217."
+    "highest_price": 214.20,
+    "last_updated": "2026-05-08",
+    "notes": "RAISED STOP: $196.50 → $206.50 (execution session May 7). Price broke above $211 resistance (pre-market target) and reached $213.16. New stop anchored just below Apr 27 intraday swing low of $207.39. Locks in $2.82/share above entry ($67.68 total on 24 shares). Next resistance: $216.54 (Apr 27 close/high) = 52-week high $216.83. Pre-market May 8: price at $214.15, testing resistance band. Will raise stop to $210.00+ after confirmed break AND close above $217."
   },
   "MSFT": {
     "entry_price": 423.57,
@@ -26,10 +26,10 @@
   "GOOGL": {
     "entry_price": 397.18,
     "initial_stop": 369.99,
-    "current_stop": 369.99,
-    "highest_price": 397.92,
-    "last_updated": "2026-05-07",
-    "notes": "Opened May 7. Actual fill avg $397.18. Stop 369.99 = entry x 0.93. Closed $397.92 at 52-week high zone. Mizuho raised PT to $460 (midday). Thesis intact. Will anchor stop to a technical level once May bars are available."
+    "current_stop": 391.00,
+    "highest_price": 400.10,
+    "last_updated": "2026-05-08",
+    "notes": "RAISED STOP: $369.99 → $391.00 (pre-market May 8). GOOGL breaking to confirmed 52-week high $400.10 intraday; pre-market at $402.61. Prior -7% stop was too wide for a stock at breakout highs. $391 sits below the $395 round number and $5.82 below entry, protecting capital if the breakout reverses. Still allows 2-3% intraday variance. Will raise again after confirmed close above $405 with a stop anchored below any emerging consolidation zone."
   },
   "AMZN": {
     "entry_price": 273.50,
