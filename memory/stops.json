@@ -38,5 +38,13 @@
     "highest_price": 273.54,
     "last_updated": "2026-05-07",
     "notes": "Opened May 7. Actual fill avg $273.50. Stop 254.39 (entry x 0.93). Closed $271.44 (-0.75%, first-day noise). Apr 27 intraday low $260.385 is technical support above stop. Near 52-week high $278.56 — upside target intact. Sentiment 0.95, 95% analyst buy."
+  },
+  "AAPL": {
+    "entry_price": 292.86,
+    "initial_stop": 272.36,
+    "current_stop": 272.36,
+    "highest_price": 292.86,
+    "last_updated": "2026-05-08",
+    "notes": "Opened May 8. Limit order at $292.86 (order ID: f8053f94-9430-431e-b518-d2099d518547). Initial stop entry x 0.93 = $272.36. 5/5 signals: macro constructive, sentiment 0.75, price 11.6% above SMA20, volume adequate, relative strength outperforming. At confirmed 52-week high ($292.13). Chart data stale (IEX last bar Apr 27 $267.55); nearest prior swing lows $269.66–$271.70 (Apr 23–24) — stop sits just above that zone. Consider tightening toward $285–$288 breakout zone after 1–2 sessions of post-entry price data. Ex-div May 11 ($0.27/share, negligible). Morningstar FV at 222% premium is background flag, not a blocker."
   }
 }
