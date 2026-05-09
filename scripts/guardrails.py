@@ -15,7 +15,7 @@ import json
 import requests
 from datetime import datetime, time, timezone
 
-# ── Alpaca config (same as alpaca.py) ─────────────────────────────────────────
+# ── Alpaca config (same as alpaca.py) ─────────────────────────────────────────────────
 API_KEY    = os.environ.get("APCA_API_KEY_ID", "")
 API_SECRET = os.environ.get("APCA_API_SECRET_KEY", "")
 BASE_URL   = os.environ.get("APCA_BASE_URL", "https://paper-api.alpaca.markets")
@@ -26,7 +26,7 @@ HEADERS = {
     "APCA-API-SECRET-KEY": API_SECRET,
 }
 
-# ── Hard Limits (mirror what's in CLAUDE.md) ──────────────────────────────────
+# ── Hard Limits (mirror what's in CLAUDE.md) ─────────────────────────────────────────────
 MAX_POSITION_PCT    = 0.10   # 10% of portfolio per position
 MAX_DAILY_LOSS_PCT  = 0.05   # 5% portfolio daily loss limit — halt all trading if reached
 MAX_OPEN_POSITIONS  = 10
@@ -75,7 +75,7 @@ def get_bars(symbol, limit=30):
     data = _get(f"/v2/stocks/{symbol}/bars?timeframe=1Day&limit={limit}&feed=iex", base=DATA_URL)
     return data.get("bars") or []
 
-# ── Portfolio-level checks ────────────────────────────────────────────────────
+# ── Portfolio-level checks ────────────────────────────────────────────────────────────────────────────────
 def check_portfolio():
     checks = []
     passed = True
@@ -149,7 +149,7 @@ def check_portfolio():
     print(json.dumps(result, indent=2))
     return passed
 
-# ── Pre-trade check ───────────────────────────────────────────────────────────
+# ── Pre-trade check ──────────────────────────────────────────────────────────────────────────────────────
 def check_trade(side, symbol, qty, limit_price):
     checks = []
     passed = True
@@ -322,7 +322,7 @@ def check_stops():
     }
     print(json.dumps(result, indent=2))
 
-# ── CLI ───────────────────────────────────────────────────────────────────────
+# ── CLI ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     args = sys.argv[1:]
     if not args:
