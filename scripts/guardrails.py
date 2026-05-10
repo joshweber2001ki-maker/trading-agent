@@ -26,6 +26,10 @@ HEADERS = {
     "APCA-API-SECRET-KEY": API_SECRET,
 }
 
+# ── Perplexity config (for ADV cross-reference when IEX volume is unreliable) ─────────────
+PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY", "")
+PERPLEXITY_URL     = "https://api.perplexity.ai/chat/completions"
+
 # ── Hard Limits (mirror what's in CLAUDE.md) ─────────────────────────────────────────────
 MAX_POSITION_PCT    = 0.10   # 10% of portfolio per position
 MAX_DAILY_LOSS_PCT  = 0.05   # 5% portfolio daily loss limit — halt all trading if reached
@@ -74,6 +78,42 @@ def get_quote(symbol):
 def get_bars(symbol, limit=30):
     data = _get(f"/v2/stocks/{symbol}/bars?timeframe=1Day&limit={limit}&feed=iex", base=DATA_URL)
     return data.get("bars") or []
+
+# ── Perplexity ADV cross-reference ───────────────────────────────────────────────────────────────────────
+def _check_liquidity_via_perplexity(symbol):
+    """Return (is_highly_liquid: bool|None, note: str). None means the check itself failed."""
+    if not PERPLEXITY_API_KEY:
+        return None, "PERPLEXITY_API_KEY not set"
+    try:
+        payload = {
+            "model": "sonar",
+            "messages": [
+                {"role": "system", "content": "You are a financial data assistant. Respond only in JSON."},
+                {"role": "user", "content": (
+                    f"What is the average daily trading volume for {symbol} stock on US exchanges? "
+                    f'Return JSON: {{"symbol": "{symbol}", "avg_daily_volume": <integer>, '
+                    f'"is_highly_liquid": <true if ADV > 1000000 shares>, "note": "brief source context"}}'
+                )},
+            ],
+            "max_tokens": 150,
+            "temperature": 0.1,
+        }
+        r = requests.post(
+            PERPLEXITY_URL,
+            headers={"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=10,
+        )
+        r.raise_for_status()
+        content = r.json()["choices"][0]["message"]["content"]
+        start = next((i for i, c in enumerate(content) if c in "{["), None)
+        if start is not None:
+            end = content.rfind("}") + 1
+            data = json.loads(content[start:end])
+            return data.get("is_highly_liquid", False), data.get("note", "")
+    except Exception as e:
+        return None, f"Perplexity check failed: {e}"
+    return None, "Could not parse Perplexity response"
 
 # ── Portfolio-level checks ────────────────────────────────────────────────────────────────────────────────
 def check_portfolio():
@@ -235,19 +275,39 @@ def check_trade(side, symbol, qty, limit_price):
         "passed": ok,
     })
 
-    # 7. Volume check (use bar data)
+    # 7. Volume check — IEX bars first; cross-reference Perplexity if IEX ADV is below threshold.
+    # IEX captures ~1-3% of true US equity volume, so large-caps frequently fail the raw IEX check.
     try:
         bars = get_bars(symbol, 30)
         if bars:
             avg_vol = sum(b["v"] for b in bars) / len(bars)
-            ok = avg_vol >= MIN_AVG_VOLUME
-            if not ok: passed = False
-            checks.append({
-                "check": "min_avg_volume",
-                "limit": MIN_AVG_VOLUME,
-                "actual": round(avg_vol),
-                "passed": ok,
-            })
+            if avg_vol >= MIN_AVG_VOLUME:
+                checks.append({
+                    "check": "min_avg_volume",
+                    "limit": MIN_AVG_VOLUME,
+                    "actual": round(avg_vol),
+                    "passed": True,
+                })
+            else:
+                is_liquid, note = _check_liquidity_via_perplexity(symbol)
+                if is_liquid:
+                    checks.append({
+                        "check": "min_avg_volume",
+                        "limit": MIN_AVG_VOLUME,
+                        "iex_adv": round(avg_vol),
+                        "passed": True,
+                        "note": f"IEX ADV {round(avg_vol):,} below threshold but Perplexity confirms high liquidity — {note}",
+                        "data_source": "perplexity_override",
+                    })
+                else:
+                    passed = False
+                    checks.append({
+                        "check": "min_avg_volume",
+                        "limit": MIN_AVG_VOLUME,
+                        "iex_adv": round(avg_vol),
+                        "passed": False,
+                        "note": note if is_liquid is None else f"Perplexity confirms low liquidity — {note}",
+                    })
     except Exception:
         checks.append({"check": "min_avg_volume", "passed": True, "note": "Could not fetch volume data"})
 

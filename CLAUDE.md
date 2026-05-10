@@ -41,6 +41,7 @@ Dynamic. Default starting watchlist: large-cap US equities with strong fundament
 ### Decision Framework
 For each symbol, conclude one of:
 - **BUY** — Majority of entry conditions met, no hard blockers, position size within limits
+  - *At resistance:* If the entry price is within 2% of a prior-month high, size the initial position at 50% of normal allocation. Add the remaining 50% only after a confirmed close through that resistance level.
 - **HOLD** — Currently in position, thesis intact, no exit trigger
 - **SELL** — Stop triggered, thesis broken, or better opportunity identified
 - **SKIP** — Hard blocker present (material risk event, earnings in <48h, guardrail would fail) or fewer than 2 signals aligned
@@ -89,7 +90,8 @@ These rules run through `scripts/guardrails.py` before EVERY order. If any check
 2. Check if any orders are still open/unfilled — cancel if stale
 3. Look for any major news events that broke since morning
 4. Adjust stop-losses if position has gained significantly (trail stops up)
-5. Log to journal under `## Midday`
+5. **Momentum trigger:** For any position that has gained >3% on notably above-average session volume, assess a stop raise and potential partial add immediately — do not defer to next pre-market session. Log the assessment in the journal.
+6. Log to journal under `## Midday`
 
 ### 4. End-of-Day Summary (runs ~16:15 ET)
 1. Pull final portfolio state from Alpaca
