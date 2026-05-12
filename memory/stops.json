@@ -3,48 +3,40 @@
     "entry_price": 203.6825,
     "initial_stop": 189.4247,
     "current_stop": 213.0,
-    "highest_price": 219.23,
-    "last_updated": "2026-05-11",
-    "notes": "RAISED STOP: $206.50 → $213.00 (EOD May 11). $217 close trigger from May 8 notes fired — NVDA reached $219.23 today, clearing prior 52-week high resistance band. New stop anchored just below May 7 close ($213.15), above Apr 29 intraday low ($207.59). Locks in $9.32/share above entry ($223.68 total on 24 shares). Next trigger: raise stop to $218+ after confirmed close above $222. Highest price updated $214.96 → $219.23."
+    "highest_price": 223.75,
+    "last_updated": "2026-05-12",
+    "notes": "Midday May 12: highest_price updated $219.23 → $223.75 (new 52-week high touched intraday). Current price $216.18 bid — pulled back from intraday high. Stop at $213.00 unchanged. Next trigger: raise stop to $218+ after confirmed CLOSE above $222 (not fired yet — requires EOD check). Stop anchored below May 7 close ($213.15). Prior: RAISED STOP $206.50 → $213.00 EOD May 11. Locks in $9.32/share above entry ($223.68 total on 24 shares)."
   },
   "MSFT": {
     "entry_price": 423.57,
     "initial_stop": 393.92,
     "current_stop": 393.92,
     "highest_price": 423.57,
-    "last_updated": "2026-05-11",
-    "notes": "Opened May 7 at $423.57. Stop = entry × 0.93 = $393.92. EOD May 8: $414.90 — below $417.12 support (session 2). EOD May 11: $412.40 — 3rd consecutive close below $417.12 (session 3). Persistent weakness. Thesis intact technically but price action is bearish. If May 12 does not reclaim $415+ on open, reassess. Consider partial trim. Ex-dividend May 21 (minor positive). Stop at $393.92 unchanged — $18.48 below current price."
-  },
-  "GOOGL": {
-    "entry_price": 397.18,
-    "initial_stop": 369.99,
-    "current_stop": 391.0,
-    "highest_price": 400.14,
-    "last_updated": "2026-05-11",
-    "notes": "STOP TRIGGERED EOD MAY 11 — SELL QUEUED FOR OPEN MAY 12. Current $389.23 < current_stop $391.00. Market closed when stop triggered during EOD scan. Action required: run guardrails then place limit sell 12 shares at bid ($389.23 or better) at 09:35 ET May 12. Remove entry after confirmed fill. Prior: RAISED STOP $369.99 → $391.00 pre-market May 8 after GOOGL hit 52-week high $400.10. Failed to close above $405 trigger. Pulled back through raised stop on May 11 open week."
+    "last_updated": "2026-05-12",
+    "notes": "PARTIAL TRIM May 12 midday: sold 6 of 12 shares at $408.34 limit (order ID 35967eeb). Rationale: 5th consecutive session below $417.12 support; did not reclaim $415 as flagged in prior EOD note. Analyst consensus bullish (95% buy, target $564) — retaining 6 shares for recovery. Remaining 6 shares, stop $393.92 unchanged. Next level to watch: $400 support. Ex-dividend May 21 minor positive. Stop = $14.42 below current bid $408.34."
   },
   "AMZN": {
     "entry_price": 273.5,
     "initial_stop": 254.39,
     "current_stop": 254.39,
     "highest_price": 273.54,
-    "last_updated": "2026-05-11",
-    "notes": "Opened May 7 at avg $273.50. Stop = entry × 0.93. Apr 27 swing low $260.39 = technical support above stop. 52-week high $278.56 = upside target. EOD May 8: $272.45. EOD May 11: $268.64 (-1.78% from entry). Drifting lower but $14.25 above stop. Watch $265 (near Apr 27 swing low) — breach would prompt thesis reassessment. Thesis intact. Held overnight."
+    "last_updated": "2026-05-12",
+    "notes": "Midday May 12: THESIS CONCERN — price $263.39 bid broke below $265 watch level set EOD May 11. Now only $3.00 above Apr 27 swing low $260.39. If $260.39 breached intraday or on close, thesis (52-week high breakout toward $278.56) is invalidated — sell warranted. No new catalyst for weakness. Stop at $254.39 unchanged. Analyst median target $282–$305 provides fundamental backstop. Holding but elevated watch status."
   },
   "AAPL": {
     "entry_price": 292.86,
     "initial_stop": 272.36,
-    "current_stop": 272.36,
-    "highest_price": 292.96,
-    "last_updated": "2026-05-11",
-    "notes": "Opened May 8 at $292.86 limit fill. Stop = entry × 0.93 = $272.36. EOD May 11: $292.60 (-0.09% from entry). Ex-dividend today ($0.27/share × 34 = $9.18 credited to account). Price essentially flat at entry — no directional signal yet. Thesis: 52-week high breakout, 5/5 signals at entry. Consider tightening stop toward $285–$288 (breakout zone) on next session showing upward momentum. Morningstar 222% premium = background flag only. Held overnight."
+    "current_stop": 285.0,
+    "highest_price": 294.37,
+    "last_updated": "2026-05-12",
+    "notes": "RAISED STOP: $272.36 → $285.00 (Midday May 12). Rationale: AAPL trading $294.37 bid, within $0.39 of 52-week high resistance $294.76. Tightened stop to breakout zone support ($285–$288 range from prior notes). Stop at $285.00 means exit if breakout fails and stock retreats to pre-breakout level. Volume below average today — watching for conviction on 52-week high push. Thesis intact: if AAPL closes above $294.76, breakout confirmed and stop can trail up. Prior stop $272.36 = initial -7% stop."
   },
   "V": {
     "entry_price": 321.95,
     "initial_stop": 299.4135,
-    "current_stop": 299.4135,
-    "highest_price": 323.63,
-    "last_updated": "2026-05-11",
-    "notes": "Entry $321.95. Stop = entry × 0.93 = $299.41. V had earnings-driven gap-up Apr 29 ($309.31 → $334.93 close). EOD May 11: $323.63, +0.52% from entry — modest pullback from Apr 29 peak. V above 20d SMA ($310.16 from bars). Thesis: strong payment network, constructive macro environment. Consider raising stop toward $312–$315 (Apr 29 intraday support zone) after 1–2 more confirming sessions. Held overnight."
+    "current_stop": 315.0,
+    "highest_price": 328.43,
+    "last_updated": "2026-05-12",
+    "notes": "RAISED STOP: $299.41 → $315.00 (Midday May 12). Per plan: raise toward $312–$315 after 1–2 confirming sessions (now 3 sessions since May 7 entry). Stop anchored at top of Apr 29 earnings gap support zone — level where gap is ~80% filled, thesis (earnings momentum) would be invalidated below here. Current bid $326.46 gives $11.46 buffer above stop. New stop limits loss to ~$6.95/share vs original $22.54 downside. Thesis: strong payment network + earnings gap momentum. Highest_price updated $323.63 → $328.43."
   }
 }
