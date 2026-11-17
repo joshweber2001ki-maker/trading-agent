@@ -9,7 +9,7 @@ Usage:
 import json
 import sys
 from collections import Counter, defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,6 +35,49 @@ def read_jsonl(path):
         except json.JSONDecodeError:
             pass
     return rows
+
+
+CORRECTIONS = Path("reports") / "trade-corrections.jsonl"
+
+
+def apply_corrections(trades, corrections):
+    """Trades the bot recorded with a wrong exit, put right.
+
+    The logs are written by the server only, so a wrong record is not edited there. Instead one line
+    per trade in reports/trade-corrections.jsonl gives the real exit (exit_price, optionally
+    exit_time and exit_reason, and a note saying how it is known). Result, R and holding time are
+    recomputed from it; what the bot had recorded is kept under "recorded".
+    """
+    by_id = {c["id"]: c for c in corrections if c.get("id") and c.get("exit_price") is not None}
+    out = []
+    for t in trades:
+        c = by_id.get(t.get("id"))
+        if c:
+            t = dict(t, recorded={k: t.get(k) for k in ("exit_price", "exit_time", "exit_reason", "pnl", "r")})
+            t.update({k: c[k] for k in ("exit_price", "exit_time", "exit_reason") if k in c})
+            dirn = 1 if t["side"] == "long" else -1
+            t["pnl"] = round((t["exit_price"] - t["entry_price"]) * t["qty"] * dirn, 2)
+            risk = abs(t["signal_price"] - t["stop_price"]) * t["qty"]
+            t["r"] = round(t["pnl"] / risk, 2) if risk else 0
+            ts = lambda x: datetime.fromisoformat(x.replace("Z", "+00:00"))
+            t["hold_min"] = round((ts(t["exit_time"]) - ts(t["entry_time"])).total_seconds() / 60, 1)
+            t["note"] = c.get("note", "")
+        out.append(t)
+    return out
+
+
+def day_result(daily, events):
+    """Start value and result of one day.
+
+    Summaries written from 2026-11-18 on measure against the broker's value at the previous close.
+    Older ones measured from the bot's last start, which hides everything before a restart during
+    the day; for those the bot's first reading of that day is the start.
+    """
+    if daily.get("basis") == "last_close":
+        return daily["equity_start"], daily["pnl"]
+    first = next((e["equity"] for e in events if e["kind"] == "day_start" and e.get("equity")), None)
+    start = first if first is not None else daily["equity_start"]
+    return start, round(daily["equity_end"] - start, 2)
 
 
 def trade_stats(trades):
@@ -116,18 +159,20 @@ def speed_stats(rows):
 
 def build(root: Path, start: date, end: date):
     days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
-    trades = [
-        t for t in read_jsonl(root / "logs" / "trades.jsonl")
-        if start.isoformat() <= t["entry_time"][:10] <= end.isoformat()
-    ]
-    events = []
+    trades = apply_corrections(
+        [t for t in read_jsonl(root / "logs" / "trades.jsonl")
+         if start.isoformat() <= t["entry_time"][:10] <= end.isoformat()],
+        read_jsonl(root / CORRECTIONS),
+    )
+    events, daily = [], []
     for d in days:
-        events += read_jsonl(root / "logs" / f"events-{d.isoformat()}.jsonl")
-    daily = []
-    for d in days:
+        of_day = read_jsonl(root / "logs" / f"events-{d.isoformat()}.jsonl")
+        events += of_day
         p = root / "logs" / "daily" / f"{d.isoformat()}.json"
         if p.exists():
-            daily.append(json.loads(p.read_text()))
+            row = json.loads(p.read_text())
+            row["equity_start"], row["pnl"] = day_result(row, of_day)
+            daily.append(row)
 
     by_strategy = defaultdict(list)
     for t in trades:
@@ -204,8 +249,11 @@ def build(root: Path, start: date, end: date):
         "rejections": dict(rejections.most_common()),
         "errors": dict(errors),
         "halts": sum(1 for e in events if e["kind"] == "halt"),
-        "orphans": sum(1 for e in events if e["kind"] == "orphan"),
+        # a position found before the open is reported again at every restart until it is sold
+        "orphans": len({(e["t"][:10], e.get("symbol")) for e in events if e["kind"] == "orphan"}),
         "no_fills": sum(1 for e in events if e["kind"] == "no_fill"),
+        "corrected": [t for t in trades if t.get("recorded")],
+        "unconfirmed": [t for t in trades if t["exit_reason"].endswith("_unconfirmed")],
         "best": sorted(trades, key=lambda t: -t["pnl"])[:3],
         "worst": sorted(trades, key=lambda t: t["pnl"])[:3],
     }
@@ -280,8 +328,14 @@ def markdown(r):
     out += ["", "## Probleme",
             f'- Fehler nach Bereich: {r["errors"] or "keine"}',
             f'- Tagesverlust-Stopps: {r["halts"]}, verwaiste Positionen: {r["orphans"]}, nicht ausgeführte Einstiege: {r["no_fills"]}',
-            f'- Eingriffe des Feierabend-Wächters (er musste vor Börsenschluss selbst glattstellen): {r["guard_interventions"]}',
-            "", "## Tage"]
+            f'- Eingriffe des Feierabend-Wächters (er musste vor Börsenschluss selbst glattstellen): {r["guard_interventions"]}']
+    out += [f'- Ausstieg nicht bestätigt, Ergebnis geschätzt (bitte am Konto prüfen und in {CORRECTIONS} richtigstellen): '
+            f'{t["symbol"]} {t["strategy"]} vom {t["entry_time"][:10]}, verbucht {t["pnl"]:+.2f} $ ({t["exit_reason"]})'
+            for t in r["unconfirmed"]]
+    out += [f'- Nachträglich richtiggestellt: {t["symbol"]} {t["strategy"]} vom {t["entry_time"][:10]}: vom Bot verbucht '
+            f'{t["recorded"]["pnl"]:+.2f} $ ({t["recorded"]["exit_reason"]}), tatsächlich {t["pnl"]:+.2f} $ '
+            f'({t["exit_reason"]}). {t["note"]}'.rstrip() for t in r["corrected"]]
+    out += ["", "## Tage"]
     out += [f'- {d["day"]}: {d["pnl"]:+.2f} $, {d["trades"]} Trades, {d["errors"]} Fehler' for d in r["equity"]["by_day"]] or ["- keine Daten"]
     for title, key in (("Beste Trades", "best"), ("Schlechteste Trades", "worst")):
         out += ["", f"## {title}"]

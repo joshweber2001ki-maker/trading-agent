@@ -536,6 +536,64 @@ def test_weekly_stats(tmp_path):
     assert default_week(datetime(2026, 11, 18).date())[0].isoformat() == "2026-11-09"
 
 
+def test_day_result_is_measured_from_the_previous_close():
+    from bot.main import day_result
+    # restarted during the day after a loss: the bot's own first reading (99,650) must not be the start
+    r = day_result({"equity": "99600", "last_equity": "100000"}, bot_start_equity=99650.0)
+    assert r == {"equity_start": 100000.0, "equity_end": 99600.0, "pnl": -400.0, "basis": "last_close"}
+    r = day_result({"equity": "99600"}, bot_start_equity=99650.0)                 # broker gives no previous close
+    assert r["pnl"] == -50.0 and r["basis"] == "bot_start"
+    assert day_result({"equity": "99600", "last_equity": "0"})["pnl"] == 0.0
+
+
+def test_weekly_stats_put_right_a_wrong_record_and_a_restarted_day(tmp_path):
+    logs = tmp_path / "logs"
+    (logs / "daily").mkdir(parents=True)
+    (tmp_path / "reports").mkdir()
+    base = {"strategy": "orb", "side": "short", "slippage_pct": 0.0, "notional": 100000, "meta": {}}
+    (logs / "trades.jsonl").write_text("\n".join(json.dumps(r) for r in [
+        # closed by hand at 142.58, but booked by the bot as a stop at an estimated 143.24
+        dict(base, id="orb-PEP-1", symbol="PEP", qty=715, signal_price=142.63, entry_price=142.53, stop_price=143.21,
+             exit_price=143.24, entry_time="2026-11-17T14:40:55Z", exit_time="2026-11-17T14:50:26Z", hold_min=9.5,
+             pnl=-507.65, r=-1.22, exit_reason="stop_sw_unconfirmed"),
+        dict(base, id="orb-JPM-1", symbol="JPM", qty=308, signal_price=332.39, entry_price=332.38, stop_price=333.39,
+             exit_price=333.56, entry_time="2026-11-17T14:37:47Z", exit_time="2026-11-17T14:38:53Z", hold_min=1.1,
+             pnl=-364.06, r=-1.18, exit_reason="stop"),
+        dict(base, id="orb-XYZ-1", symbol="XYZ", qty=10, signal_price=50.0, entry_price=50.0, stop_price=51.0,
+             exit_price=50.5, entry_time="2026-11-18T15:00:00Z", exit_time="2026-11-18T15:30:00Z", hold_min=30.0,
+             pnl=-5.0, r=-0.5, exit_reason="time_unconfirmed"),
+    ]))
+    (tmp_path / "reports" / "trade-corrections.jsonl").write_text(json.dumps(
+        {"id": "orb-PEP-1", "exit_price": 142.58, "exit_time": "2026-11-17T14:41:09Z", "exit_reason": "external",
+         "note": "Von Hand geschlossen."}) + "\n" + json.dumps({"id": "orb-JPM-1", "note": "ohne Kurs: wird ignoriert"}))
+    (logs / "events-2026-11-17.jsonl").write_text("\n".join(json.dumps(e) for e in [
+        {"t": "2026-11-17T10:38:17Z", "kind": "orphan", "symbol": "AAPL"},
+        {"t": "2026-11-17T10:38:24Z", "kind": "day_start", "equity": 102481.39},
+        {"t": "2026-11-17T11:07:10Z", "kind": "orphan", "symbol": "AAPL"},          # same position, next restart
+        {"t": "2026-11-17T14:45:10Z", "kind": "day_start", "equity": 102068.67},    # restart after both losses
+    ]))
+    # written by the old version: measured from the restart, so the day looks flat
+    (logs / "daily" / "2026-11-17.json").write_text(json.dumps(
+        {"day": "2026-11-17", "equity_start": 102068.67, "equity_end": 102068.67, "pnl": 0.0, "trades": 2, "errors": 0}))
+    # written by the new version: measured from the previous close, taken as it is
+    (logs / "events-2026-11-18.jsonl").write_text(json.dumps({"t": "2026-11-18T05:00:00Z", "kind": "day_start", "equity": 102070.0}))
+    (logs / "daily" / "2026-11-18.json").write_text(json.dumps(
+        {"day": "2026-11-18", "equity_start": 102068.67, "equity_end": 102063.67, "pnl": -5.0, "basis": "last_close",
+         "trades": 1, "errors": 0}))
+    r = build(tmp_path, *week_of(datetime(2026, 11, 17).date()))
+    pep = next(t for t in r["worst"] if t["symbol"] == "PEP")
+    assert pep["pnl"] == -35.75 and pep["r"] == -0.09 and pep["exit_reason"] == "external" and pep["hold_min"] == 0.2
+    assert pep["recorded"]["pnl"] == -507.65 and [t["symbol"] for t in r["corrected"]] == ["PEP"]
+    assert r["all"]["pnl"] == round(-35.75 - 364.06 - 5.0, 2) and r["all"]["exit_reasons"]["external"] == 1
+    assert [t["symbol"] for t in r["unconfirmed"]] == ["XYZ"]                       # still open to checking
+    days = {d["day"]: d["pnl"] for d in r["equity"]["by_day"]}
+    assert days == {"2026-11-17": round(102068.67 - 102481.39, 2), "2026-11-18": -5.0}
+    assert r["equity"]["start"] == 102481.39 and r["orphans"] == 1
+    md = markdown(r)
+    assert "Nachträglich richtiggestellt: PEP" in md and "verbucht -507.65 $" in md and "tatsächlich -35.75 $" in md
+    assert "Ausstieg nicht bestätigt" in md and "XYZ" in md and "2026-11-17: -412.72 $" in md
+
+
 def test_outcomes_are_measured_after_the_close_from_the_event_log(tmp_path):
     from bot.news_strategy import NewsStrategy
     t = datetime.now(timezone.utc)
@@ -661,6 +719,33 @@ def test_sec_filings_are_listed_once_with_ticker_and_acceptance_time(tmp_path, m
     assert len([r for r in j.recent_events(1) if r["kind"] == "sec_item"]) == 2
 
 
+def test_sec_list_starts_as_soon_as_the_stock_list_is_loaded(tmp_path, monkeypatch):
+    from bot import edgar as edgar_mod
+    from bot.edgar import Edgar
+
+    class Uni:
+        cache = {}                                         # still loading when the bot has just started
+
+    e = Edgar(CFG["edgar"], "someone@example.org", Uni(), Journal(tmp_path))
+    e.in_hours = lambda: True
+    looks, waits = [], []
+
+    async def collect():
+        looks.append(len(waits))
+
+    async def sleep(seconds):
+        waits.append(seconds)
+        Uni.cache = {"ACME": {}}                           # loaded in the meantime
+        if len(waits) == 3:
+            raise asyncio.CancelledError
+
+    e.collect = collect
+    monkeypatch.setattr(edgar_mod.asyncio, "sleep", sleep)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(e.run())
+    assert waits == [edgar_mod.STARTUP_WAIT_S, CFG["edgar"]["poll_s"], CFG["edgar"]["poll_s"]] and looks == [1, 2]
+
+
 def test_price_path_around_an_announcement():
     from bot.speed import price_path, session_of
     t0 = datetime(2026, 11, 17, 15, 0, 0, tzinfo=timezone.utc)                  # 10:00 in New York
@@ -742,3 +827,119 @@ def test_speed_statistics_show_what_is_left_for_a_late_entry():
     assert (s["left_after_2s"], s["left_after_10s"], s["left_after_60s"], s["left_after_120s"]) == (2.0, 1.5, 0.5, 0.2)
     assert s["before_publication"] == 0.4 and s["after_30min"] == 2.5 and s["usd_first_10s"] == 5000
     assert speed_stats([])["n"] == 0
+
+
+# ── the whole program against a simulated broker ─────────────────────────────
+def test_bot_starts_lists_filings_and_measures_after_the_close_without_trading(tmp_path, monkeypatch):
+    """Start, begin the day, list SEC filings, run both measurements after the close, write the
+    status file. No strategy has anything to do here, so the account must not be touched."""
+    from collections import Counter
+    from bot import common as common_mod, main as main_mod, orb_strategy as orb_mod
+    from bot.news_strategy import OUTCOME_DELAY_MIN
+
+    for mod in (common_mod, main_mod, ex_mod, orb_mod):                   # logs and state go to the test folder
+        monkeypatch.setattr(mod, "DATA", tmp_path)
+    for name, value in (("APCA_API_KEY_ID", "test"), ("APCA_API_SECRET_KEY", "test"), ("SEC_CONTACT", "someone@example.org")):
+        monkeypatch.setenv(name, value)
+    for name in ("ANTHROPIC_API_KEY", "APCA_BASE_URL", "APCA_DATA_FEED"):
+        monkeypatch.delenv(name, raising=False)
+
+    t_now = datetime.now(timezone.utc)
+    t0 = t_now.replace(hour=15, minute=0, second=0, microsecond=0)        # a filing during a regular session,
+    while t0 > t_now - timedelta(hours=1) or t0.weekday() >= 5:           # old enough to be measured
+        t0 -= timedelta(days=1)
+    calls = []
+
+    async def req(method, url, ok404=False, **kw):
+        params = kw.get("params") or {}
+        calls.append(method)
+        if method != "GET":
+            raise AssertionError(f"the bot tried to change the account: {method} {url}")
+        if url.endswith("/calendar"):
+            return [{"date": params["start"], "open": "09:30", "close": "16:00"}]
+        if url.endswith("/account"):
+            return {"equity": "100000", "last_equity": "100400", "buying_power": "400000"}
+        if url.endswith("/assets"):
+            return [{"symbol": sym, "class": "us_equity", "status": "active", "tradable": True, "exchange": "NYSE",
+                     "name": sym.title() + " Corp", "shortable": True, "easy_to_borrow": True} for sym in ("ACME", "GAMMA")]
+        if url.endswith("/positions") or url.endswith("/orders"):
+            return []
+        if url.endswith("/stocks/bars"):
+            return {"bars": {}}
+        if url.endswith("/trades"):                                       # 100 before the filing, 102 from one second after
+            start, end = parse_ts(params["start"]), parse_ts(params["end"])
+            xs = [{"t": iso(t0 + timedelta(seconds=sec)), "p": 102.0 if sec > 0 else 100.0, "s": 100, "c": ["@"]}
+                  for sec in (-30, -5, 1, 20, 200, 1000)]
+            xs = [x for x in xs if start <= parse_ts(x["t"]) <= end]
+            return {"trades": (xs[::-1] if params["sort"] == "desc" else xs)[:params["limit"]], "next_page_token": None}
+        raise AssertionError(f"unexpected request: {method} {url}")
+
+    stamp = t0.astimezone(ET).isoformat(timespec="seconds")
+    feed = ('<?xml version="1.0" encoding="ISO-8859-1" ?><feed xmlns="http://www.w3.org/2005/Atom">'
+            + _sec_entry("B1", "8-K - ACME CORP (0000000011) (Filer)", stamp, ["2.02"])
+            + _sec_entry("B2", "8-K - GAMMA &amp; CO (0000000015) (Filer)", stamp, ["1.01"]) + "</feed>").encode("latin-1")
+
+    class Resp:
+        def __init__(self, content=b"", data=None): self.content, self.data = content, data
+        def raise_for_status(self): pass
+        def json(self): return self.data
+
+    class SecHttp:
+        async def get(self, url, params=None):
+            if url.endswith("company_tickers.json"):
+                return Resp(data={"0": {"cik_str": 11, "ticker": "ACME"}, "1": {"cik_str": 15, "ticker": "GAMMA"}})
+            empty = b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+            return Resp(content=feed if params["start"] == 0 else empty)
+
+    async def scenario():
+        b = main_mod.Bot()
+        b.api._req = req
+        b.edgar.http, b.edgar.in_hours = SecHttp(), lambda: True
+        b.cfg["execution"]["poll_s"] = 0.02
+
+        async def idle():
+            await asyncio.sleep(3600)
+        b.news_loop = b.wires.run = idle                                  # no news stream, no feed polling, no KI
+
+        def seen(kind):
+            return sum(1 for r in b.journal.recent_events(1) if r["kind"] == kind)
+
+        async def until(kind, n):
+            for _ in range(200):
+                if seen(kind) >= n:
+                    return
+                await asyncio.sleep(0.05)
+            raise AssertionError(f"no {kind} after 10 s: {[r for r in b.journal.recent_events(1)]}")
+
+        await b.session.refresh()
+        b.session.open = datetime.now(timezone.utc) - timedelta(hours=7)   # pretend: the session ended 21 minutes ago
+        b.session.close = datetime.now(timezone.utc) - timedelta(minutes=OUTCOME_DELAY_MIN + 1)
+        task = asyncio.ensure_future(b.run())
+        try:
+            await until("sec_item", 2)
+            b.session.close -= timedelta(minutes=b.cfg["speed"]["after_close_min"])   # now the speed measurement is due
+            await until("speed_done", 1)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        return b
+
+    b = asyncio.run(scenario())
+    rows = list(b.journal.recent_events(1))
+    kinds = Counter(r["kind"] for r in rows)
+    assert kinds["error"] == 0, [r for r in rows if r["kind"] == "error"]
+    assert (kinds["day_start"], kinds["sec_item"], kinds["news_speed"], kinds["speed_done"]) == (1, 2, 2, 1)
+    assert next(r for r in rows if r["kind"] == "day_start")["last_equity"] == 100400.0
+    done = next(r for r in rows if r["kind"] == "speed_done")
+    assert (done["due"], done["measured"], done["skipped"], done["errors"]) == (2, 2, 0, 0)
+    acme = next(r for r in rows if r["kind"] == "news_speed" and r["symbol"] == "ACME")
+    assert (acme["src"], acme["ref"], acme["session"], acme["items"]) == ("sec", "B1", "regular", ["2.02"])
+    assert (acme["price"], acme["ref_age_s"], acme["r1"], acme["r300"], acme["r1800"]) == (100.0, 5, 2.0, 2.0, 2.0)
+    status = json.loads((tmp_path / "logs" / "status.json").read_text())
+    assert status["open_trades"] == [] and status["trades_today"] == 0 and "edgar" in status
+    assert b.outcomes_day == b.day and not b.executor.trades and set(calls) == {"GET"}
+    assert not (tmp_path / "logs" / "trades.jsonl").exists()
+

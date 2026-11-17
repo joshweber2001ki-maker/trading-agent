@@ -32,7 +32,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `deploy/` | Installation, Dienste, stündlicher Abgleich mit GitHub |
 | `memory/strategy.md` | die Strategie in Worten, mit Begründung der Startwerte |
 | `logs/` | Protokolle des Servers (werden stündlich vom Server hochgeladen) |
-| `reports/` | Wochenrückblicke und Bewertungen (offene Vorschläge stehen dort) |
+| `reports/` | Wochenrückblicke und Bewertungen (offene Vorschläge stehen dort); `trade-corrections.jsonl`: richtiggestellte Trades |
 | `archive/aria-v1/` | altes Setup „ARIA" (April–Mai 2026), nur zum Nachlesen |
 
 ## Regeln für die Arbeit an diesem Repo
@@ -68,4 +68,13 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
   Kursverlauf im Sekundentakt danach (`news_speed`), bewertete Meldungen (`news_classified`),
   Kursverlauf in Minuten danach (`news_outcome`), abgelehnte Signale mit Grund, Fehler,
   Eingriffe des Wächters (`guard`)
-- `logs/daily/JJJJ-MM-TT.json` – Tagesabschluss
+- `logs/daily/JJJJ-MM-TT.json` – Tagesabschluss. Das Ergebnis misst gegen den Depotwert zum
+  Börsenschluss des Vortags (`basis: last_close`), ein Neustart am Tag ändert daran nichts. Der
+  Abschluss vom 17.11.2026 stammt noch von der alten Version und zählt erst ab dem Neustart um
+  14:45 UTC; `tools/weekly_stats.py` nimmt für solche Tage den ersten Stand des Tages.
+- Ein Ausstiegsgrund, der auf `_unconfirmed` endet, heißt: Der Bot konnte den Ausstiegskurs nicht
+  beim Broker bestätigen und hat ihn geschätzt. Solche Trades am Konto prüfen. Falsch verbuchte
+  Trades werden nicht in `logs/` geändert, sondern in `reports/trade-corrections.jsonl`
+  richtiggestellt (eine Zeile je Trade: `id`, `exit_price`, wahlweise `exit_time` und
+  `exit_reason`, dazu `note` mit dem Beleg); `tools/weekly_stats.py` rechnet mit dem
+  richtiggestellten Ergebnis und nennt beide Werte.

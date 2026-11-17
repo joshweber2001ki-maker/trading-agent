@@ -22,6 +22,7 @@ TICKERS = "https://www.sec.gov/files/company_tickers.json"
 ATOM = "{http://www.w3.org/2005/Atom}"
 TITLE = re.compile(r"^(8-K(?:/A)?) - (.*) \((\d{10})\) \(Filer\)\s*$")
 PAGE = 100
+STARTUP_WAIT_S = 15     # while the bot's list of tradable stocks is still loading
 
 
 def parse_feed(xml_bytes):
@@ -137,14 +138,16 @@ class Edgar:
             return
         log.info("edgar: looking for new 8-K filings every %d s", self.cfg["poll_s"])
         while True:
+            ready = bool(self.universe.cache)
             try:
-                if self.universe.cache and self.in_hours():
+                if ready and self.in_hours():
                     await self.collect()
             except Exception as e:
                 self.stats["errors"] += 1
                 if self.stats["errors"] <= 10 or self.stats["errors"] % 50 == 0:
                     self.journal.event("error", where="edgar", error=repr(e)[:200])
-            await asyncio.sleep(self.cfg["poll_s"])
+            # Right after the bot starts, the list of tradable stocks is still loading: look again soon.
+            await asyncio.sleep(self.cfg["poll_s"] if ready else STARTUP_WAIT_S)
 
 
 def _demo():   # python -m bot.edgar <contact>  -> prints the newest filings, for a manual check

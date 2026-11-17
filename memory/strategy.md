@@ -194,9 +194,15 @@ wenn die Zahlen es nicht tragen.
   SEC-Meldungen eingebaut.
 - Erster Handelstag (17.11.), zwei Trades der Ausbruchs-Strategie, je rund 102.000 $ groß:
   JPM short, nach 66 Sekunden ausgestoppt (−364 $; der Stop wurde 0,05 % schlechter ausgeführt
-  als gesetzt). PEP short, 11 Sekunden nach dem Einstieg von Hand im Alpaca-Dashboard
-  geschlossen (−36 $). Der Bot bemerkte das nicht und führte PEP weiter als offen; die damals
-  laufende Version bucht so eine Position beim Zeitlimit mit geschätztem Kurs aus
-  (Ausstiegsgrund endet auf `_unconfirmed`), das ist kein echtes Ergebnis.
+  als gesetzt). PEP short, Sekunden nach dem Einstieg durch eine Kauforder aus dem
+  Alpaca-Dashboard geschlossen (−35,75 $). Der Bot bemerkte das nicht, führte PEP weiter als
+  offen und buchte neun Minuten später einen Stop-Ausstieg zu einem geschätzten Kurs
+  (`stop_sw_unconfirmed`, −507,65 $). Diesen Verlust gab es nie: Der Depotwert fiel durch PEP
+  nur um 35,75 $. Echtes Ergebnis der beiden Trades: −399,81 $.
   Behoben (aktiv ab 18.11.): Von Hand geschlossene Positionen werden erkannt und mit dem
-  echten Schlusskurs verbucht (Ausstiegsgrund `external`).
+  echten Schlusskurs verbucht (Ausstiegsgrund `external`). Der falsche PEP-Eintrag ist in
+  `reports/trade-corrections.jsonl` richtiggestellt; die Wochenstatistik rechnet damit.
+- 2026-11-17 (ohne Einfluss auf den Handel, aktiv ab 18.11.): Der Tagesabschluss misst das
+  Ergebnis gegen den Depotwert zum Börsenschluss des Vortags. Vorher zählte er ab dem letzten
+  Start des Bots; nach dem Neustart am Nachmittag des 17.11. weist der Abschluss dieses Tages
+  deshalb fast null aus statt des echten Verlusts. Die Wochenstatistik gleicht das aus.

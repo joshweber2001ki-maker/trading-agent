@@ -83,6 +83,14 @@ Vergleich für den 16.11., 26 Aktien:
    **Behoben am 17.11.:** Er erkennt sie und verbucht den echten Schlusskurs (`external`).
 7. **Folgekurse** (`news_outcome`) wurden mit IEX-Kursen gemessen. **Behoben am 17.11.:**
    Messung jetzt einmal nach Börsenschluss mit Kursen des Gesamtmarkts.
+9. **Geschätzter Ausstieg als Ergebnis verbucht:** Bei PEP buchte der Bot am 17.11. einen
+   Verlust von 507,65 $, den es nie gab (die Position war schon von Hand geschlossen, echt
+   −35,75 $). **Behoben am 17.11.:** siehe Punkt 8; der Eintrag ist in
+   `reports/trade-corrections.jsonl` richtiggestellt, und die Wochenstatistik listet jeden
+   Trade mit geschätztem Ausstiegskurs zum Nachprüfen auf.
+10. **Tagesabschluss nach einem Neustart:** Das Tagesergebnis zählte ab dem letzten Start des
+   Bots. Nach dem Neustart am Nachmittag des 17.11. steht dort fast null statt rund −400 $.
+   **Behoben am 17.11.:** Maßstab ist jetzt der Depotwert zum Börsenschluss des Vortags.
 
 ## 5. KI
 

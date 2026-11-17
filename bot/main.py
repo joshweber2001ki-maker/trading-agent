@@ -22,6 +22,19 @@ from .wires import Wires
 NEWS_WS = "wss://stream.data.alpaca.markets/v1beta1/news"
 
 
+def day_result(account: dict, bot_start_equity=None) -> dict:
+    """Account value at the start and end of the day and the difference.
+
+    The start is the broker's value at yesterday's close. The bot's own first reading of the day
+    is only the fallback: after a restart during the day it would hide everything before it.
+    """
+    equity = float(account["equity"])
+    last_close = float(account.get("last_equity") or 0)
+    start = last_close or bot_start_equity or equity
+    return {"equity_start": start, "equity_end": equity, "pnl": round(equity - start, 2),
+            "basis": "last_close" if last_close else "bot_start"}
+
+
 class Bot:
     def __init__(self):
         self.cfg = load_config()
@@ -162,8 +175,8 @@ class Bot:
         self.start_equity = float(a["equity"])
         self.journal.event(
             "day_start", day=self.day, trading_day=self.session.trading_day, universe=universe,
-            equity=self.start_equity, llm=self.llm.available,
-            news=self.cfg["news"]["enabled"], orb=self.cfg["orb"]["enabled"],
+            equity=self.start_equity, last_equity=float(a.get("last_equity") or 0) or None,
+            llm=self.llm.available, news=self.cfg["news"]["enabled"], orb=self.cfg["orb"]["enabled"],
         )
         if self.session.trading_day and now() >= self.session.open:
             # Started mid-session: the opening range is gone, skip ORB today.
@@ -173,11 +186,8 @@ class Bot:
         await self.executor.flatten("eod")
         await self.api.cancel_all()
         self.flattened = True
-        a = await self.api.account()
-        equity = float(a["equity"])
         summary = {
-            "day": self.day, "equity_start": self.start_equity, "equity_end": equity,
-            "pnl": round(equity - (self.start_equity or equity), 2),
+            "day": self.day, **day_result(await self.api.account(), self.start_equity),
             "trades": self.executor.trades_today, "news": self.news.stats, "wires": self.wires.stats,
             "llm_calls": self.llm.day_calls, "errors": self.errors,
             "orb_watched": sorted(self.orb.ranges), "orb_traded": sorted(self.orb.fired),
