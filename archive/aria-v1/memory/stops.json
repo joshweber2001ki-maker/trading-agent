@@ -1,0 +1,42 @@
+{
+  "NVDA": {
+    "entry_price": 203.6825,
+    "initial_stop": 189.4247,
+    "current_stop": 213.0,
+    "highest_price": 223.75,
+    "last_updated": "2026-05-12",
+    "notes": "Midday May 12: highest_price updated $219.23 → $223.75 (new 52-week high touched intraday). Current price $216.18 bid — pulled back from intraday high. Stop at $213.00 unchanged. Next trigger: raise stop to $218+ after confirmed CLOSE above $222 (not fired yet — requires EOD check). Stop anchored below May 7 close ($213.15). Prior: RAISED STOP $206.50 → $213.00 EOD May 11. Locks in $9.32/share above entry ($223.68 total on 24 shares)."
+  },
+  "MSFT": {
+    "entry_price": 423.57,
+    "initial_stop": 393.92,
+    "current_stop": 393.92,
+    "highest_price": 423.57,
+    "last_updated": "2026-05-12",
+    "notes": "PARTIAL TRIM May 12 midday: sold 6 of 12 shares at $408.34 limit (order ID 35967eeb). Rationale: 5th consecutive session below $417.12 support; did not reclaim $415 as flagged in prior EOD note. Analyst consensus bullish (95% buy, target $564) — retaining 6 shares for recovery. Remaining 6 shares, stop $393.92 unchanged. Next level to watch: $400 support. Ex-dividend May 21 minor positive. Stop = $14.42 below current bid $408.34."
+  },
+  "AMZN": {
+    "entry_price": 273.5,
+    "initial_stop": 254.39,
+    "current_stop": 254.39,
+    "highest_price": 273.54,
+    "last_updated": "2026-05-12",
+    "notes": "Midday May 12: THESIS CONCERN — price $263.39 bid broke below $265 watch level set EOD May 11. Now only $3.00 above Apr 27 swing low $260.39. If $260.39 breached intraday or on close, thesis (52-week high breakout toward $278.56) is invalidated — sell warranted. No new catalyst for weakness. Stop at $254.39 unchanged. Analyst median target $282–$305 provides fundamental backstop. Holding but elevated watch status."
+  },
+  "AAPL": {
+    "entry_price": 292.86,
+    "initial_stop": 272.36,
+    "current_stop": 285.0,
+    "highest_price": 294.37,
+    "last_updated": "2026-05-12",
+    "notes": "RAISED STOP: $272.36 → $285.00 (Midday May 12). Rationale: AAPL trading $294.37 bid, within $0.39 of 52-week high resistance $294.76. Tightened stop to breakout zone support ($285–$288 range from prior notes). Stop at $285.00 means exit if breakout fails and stock retreats to pre-breakout level. Volume below average today — watching for conviction on 52-week high push. Thesis intact: if AAPL closes above $294.76, breakout confirmed and stop can trail up. Prior stop $272.36 = initial -7% stop."
+  },
+  "V": {
+    "entry_price": 321.95,
+    "initial_stop": 299.4135,
+    "current_stop": 315.0,
+    "highest_price": 328.43,
+    "last_updated": "2026-05-12",
+    "notes": "RAISED STOP: $299.41 → $315.00 (Midday May 12). Per plan: raise toward $312–$315 after 1–2 confirming sessions (now 3 sessions since May 7 entry). Stop anchored at top of Apr 29 earnings gap support zone — level where gap is ~80% filled, thesis (earnings momentum) would be invalidated below here. Current bid $326.46 gives $11.46 buffer above stop. New stop limits loss to ~$6.95/share vs original $22.54 downside. Thesis: strong payment network + earnings gap momentum. Highest_price updated $323.63 → $328.43."
+  }
+}
