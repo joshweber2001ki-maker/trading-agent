@@ -83,6 +83,7 @@ def outcome_stats(rows):
 
 
 MOVER_PCT = 1.0     # an announcement counts as a mover if the price is at least this far away after 5 minutes
+FRESH_REF_S = 600   # the stock must have traded within this many seconds before the announcement
 SESSIONS = {"pre": "vorbörslich", "regular": "Handelszeit", "post": "nachbörslich"}
 
 
@@ -96,10 +97,14 @@ def speed_stats(rows):
         xs = sorted(x for x in xs if x is not None)
         return round(xs[len(xs) // 2], 2) if xs else None
 
-    ok = [r for r in rows if not r.get("skipped") and r.get("r300") is not None]
+    measured = [r for r in rows if not r.get("skipped") and r.get("r300") is not None]
+    # Only stocks that were trading right before the announcement: with a reference price that is
+    # hours old, the first trade afterwards is a gap, not a move anyone could have followed.
+    ok = [r for r in measured if (r.get("ref_age_s") or 0) <= FRESH_REF_S]
     movers = [r for r in ok if abs(r["r300"]) >= MOVER_PCT]
     sign = lambda r: 1 if r["r300"] > 0 else -1
-    out = {"n": len(ok), "skipped": sum(1 for r in rows if r.get("skipped")), "movers": len(movers),
+    out = {"n": len(ok), "thin": len(measured) - len(ok), "skipped": sum(1 for r in rows if r.get("skipped")),
+           "movers": len(movers),
            "move_300": med(abs(r["r300"]) for r in movers),
            "before_publication": med(r["pre_move"] * sign(r) for r in movers if r.get("pre_move") is not None),
            "after_30min": med(r["r1800"] * sign(r) for r in movers if r.get("r1800") is not None),
@@ -247,11 +252,12 @@ def markdown(r):
     out += [f"- Wirkung {k}: {fo(v)}" for k, v in rv["by_impact"].items()]
     out += [f"- Quelle {k}: {fo(v)}" for k, v in rv["by_source"].items()]
     def fs(o):
+        thin = f' (dazu {o["thin"]} ohne Handel in den 10 Minuten davor)' if o.get("thin") else ""
         if not o["n"]:
-            return "keine Daten"
+            return "keine Daten" + thin
         if not o["movers"]:
-            return f'{o["n"]} Meldungen gemessen, keine mit mindestens {MOVER_PCT:g} % Bewegung in 5 Minuten'
-        return (f'{o["n"]} Meldungen gemessen, {o["movers"]} mit mindestens {MOVER_PCT:g} % Bewegung in 5 Minuten. Bei diesen: '
+            return f'{o["n"]} Meldungen gemessen{thin}, keine mit mindestens {MOVER_PCT:g} % Bewegung in 5 Minuten'
+        return (f'{o["n"]} Meldungen gemessen{thin}, {o["movers"]} mit mindestens {MOVER_PCT:g} % Bewegung in 5 Minuten. Bei diesen: '
                 f'Bewegung nach 5 min {o["move_300"]} %; davon noch zu holen bei Einstieg nach 2 s / 10 s / 60 s / 120 s = '
                 f'{o["left_after_2s"]} / {o["left_after_10s"]} / {o["left_after_60s"]} / {o["left_after_120s"]} Prozentpunkte; '
                 f'schon vor der Veröffentlichung gelaufen {o["before_publication"]} %; Stand nach 30 min {o["after_30min"]} %; '

@@ -668,12 +668,13 @@ def test_price_path_around_an_announcement():
     pre = [at(-2, 100.0, 100), at(-30, 99.5, 200)]
     post = [at(0.5, 100.2, 100), at(1.5, 100.5, 300), at(8, 101.0, 100), at(50, 102.0, 1000), at(200, 101.5, 100)]
     p = price_path(pre, post, t0)
-    assert (p["price"], p["pre_move"], p["pre_span_s"], p["first_trade_s"]) == (100.0, 0.503, 30, 0.5)
+    assert (p["price"], p["ref_age_s"], p["pre_move"], p["pre_span_s"], p["first_trade_s"]) == (100.0, 2, 0.503, 30, 0.5)
     assert [p[f"r{h}"] for h in (1, 2, 5, 10, 30, 60, 120, 300)] == [0.2, 0.5, 0.5, 1.0, 1.0, 2.0, 2.0, 1.5]
     assert (p["n_0_2"], p["usd_0_2"], p["n_2_10"], p["usd_10_60"], p["n_60_300"]) == (2, 40170, 1, 102000, 1)
     quiet = price_path(pre, [], t0)
     assert quiet["r300"] == 0.0 and quiet["first_trade_s"] is None              # nobody traded: no move
-    assert price_path([], post, t0) is None and price_path([at(-700, 100.0, 1)], post, t0) is None
+    assert price_path([], post, t0) is None                                     # never traded before: nothing to compare with
+    assert price_path([at(-7000, 100.0, 1)], post, t0)["ref_age_s"] == 7000     # thin stock: old reference, flagged by its age
     part = price_path(pre, post[:3], t0, covered_s=9)                           # busy stock, data cut off after 9 s
     assert part["r5"] == 0.5 and part["r10"] is None and part["usd_0_2"] == 40170 and part["n_2_10"] is None
     ny = lambda h, m, d=17: session_of(datetime(2026, 11, d, h, m, tzinfo=ET))
@@ -732,11 +733,12 @@ def test_speed_statistics_show_what_is_left_for_a_late_entry():
     rows = [
         {"r300": 2.0, "r2": 0.1, "r10": 0.5, "r60": 1.5, "r120": 1.8, "r1800": 2.5, "pre_move": 0.1, "usd_0_2": 1000, "usd_2_10": 4000},
         {"r300": -3.0, "r2": -1.0, "r10": -2.0, "r60": -3.5, "r120": -3.0, "r1800": -1.0, "pre_move": -0.4, "usd_0_2": 0, "usd_2_10": 2000},
-        {"r300": 0.3, "r2": 0.0, "r10": 0.1, "r60": 0.2, "r120": 0.3, "r1800": 0.1, "pre_move": 0.0},
+        {"r300": 0.3, "r2": 0.0, "r10": 0.1, "r60": 0.2, "r120": 0.3, "r1800": 0.1, "pre_move": 0.0, "ref_age_s": 12},
+        {"r300": 9.0, "r2": 9.0, "r10": 9.0, "r60": 9.0, "r120": 9.0, "r1800": 9.0, "pre_move": 0.0, "ref_age_s": 40000},  # gap in a thin stock
         {"skipped": "no_trade_before"},
     ]
     s = speed_stats(rows)
-    assert (s["n"], s["skipped"], s["movers"], s["move_300"]) == (3, 1, 2, 3.0)
+    assert (s["n"], s["thin"], s["skipped"], s["movers"], s["move_300"]) == (3, 1, 1, 2, 3.0)
     assert (s["left_after_2s"], s["left_after_10s"], s["left_after_60s"], s["left_after_120s"]) == (2.0, 1.5, 0.5, 0.2)
     assert s["before_publication"] == 0.4 and s["after_30min"] == 2.5 and s["usd_first_10s"] == 5000
     assert speed_stats([])["n"] == 0

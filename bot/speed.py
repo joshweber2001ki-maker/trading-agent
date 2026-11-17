@@ -15,7 +15,8 @@ from .common import ET, iso, now, parse_ts
 HORIZONS_S = (1, 2, 5, 10, 30, 60, 120, 300)
 LATER_S = (900, 1800)
 BUCKETS = ((0, 2), (2, 10), (10, 60), (60, 300))    # seconds after publication, for traded volume
-MAX_REF_AGE_S = 600                                 # without a trade in the ten minutes before: not measurable
+MAX_REF_AGE_S = 4 * 86400                           # the last trade before may be days old (thin stock, weekend)
+FRESH_REF_S = 600                                   # a reference price this recent says the stock was trading
 SETTLE_S = LATER_S[-1] + 20 * 60                    # measurable once the last horizon is 20 minutes old
 # Trade conditions that do not show the price at that moment (late, averaged or special-term reports).
 NOT_A_PRICE = set("WZUL479CNRPHV")
@@ -45,13 +46,15 @@ def price_path(pre, post, t0, covered_s=None):
 
     pre: trades before t0, newest first. post: trades from t0 on, oldest first. covered_s: how many
     seconds after t0 `post` is complete (None = all of it); later values are left empty.
-    Returns None without a trade in the ten minutes before t0.
+    Returns None without any trade before t0. ref_age_s tells how old the reference price is:
+    in a thinly traded stock it can be hours old, and the first trade after t0 then shows a gap.
     """
     if not pre or (t0 - pre[0][0]).total_seconds() > MAX_REF_AGE_S:
         return None
     ref, oldest = pre[0][1], pre[-1]
     out = {
         "price": ref,
+        "ref_age_s": round((t0 - pre[0][0]).total_seconds()),
         "pre_move": round((ref - oldest[1]) / oldest[1] * 100, 3),     # move over the trades fetched before t0
         "pre_span_s": round((t0 - oldest[0]).total_seconds()),
         "first_trade_s": round((post[0][0] - t0).total_seconds(), 2) if post else None,
