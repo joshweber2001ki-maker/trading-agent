@@ -1,0 +1,22 @@
+{
+  "day": "2026-11-17",
+  "equity_start": 102068.67,
+  "equity_end": 102068.67,
+  "pnl": 0.0,
+  "trades": 2,
+  "news": {
+    "received": 466,
+    "classified": 251,
+    "candidates": 9
+  },
+  "wires": {
+    "polls": 3574,
+    "items": 581,
+    "matched": 84,
+    "errors": 0
+  },
+  "llm_calls": 251,
+  "errors": 0,
+  "orb_watched": [],
+  "orb_traded": []
+}
