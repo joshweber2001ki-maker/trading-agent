@@ -593,3 +593,150 @@ def test_outcomes_are_measured_after_the_close_from_the_event_log(tmp_path):
     api, n1, _, out, rows = run(tmp_path / "b", fail_sip=True)       # whole-market data refused
     assert n1 == 2 and {r["feed"] for r in out} == {"iex"} and api.feeds[:2] == ["sip", None]
     assert any(r["kind"] == "error" and r["where"] == "news_outcomes_sip" for r in rows)
+
+
+# ── measuring how fast prices react (no trading involved) ─────────────────────
+def _sec_entry(acc, title, updated, items):
+    summary = " &lt;b&gt;Filed:&lt;/b&gt; 2026-11-17 &lt;b&gt;AccNo:&lt;/b&gt; %s" % acc + "".join(
+        "\n&lt;br&gt;Item %s: Something" % i for i in items)
+    return ('<entry><title>%s</title><summary type="html">%s</summary><updated>%s</updated>'
+            '<id>urn:tag:sec.gov,2008:accession-number=%s</id></entry>' % (title, summary, updated, acc))
+
+
+SEC_FEED = ('<?xml version="1.0" encoding="ISO-8859-1" ?><feed xmlns="http://www.w3.org/2005/Atom">' + "".join([
+    _sec_entry("A1", "8-K - ACME CORP (0000000011) (Filer)", "2026-11-17T09:25:18-05:00", ["2.02", "9.01"]),
+    _sec_entry("A1", "8-K - ACME FINANCE LLC (0000000012) (Filer)", "2026-11-17T09:25:18-05:00", ["2.02", "9.01"]),
+    _sec_entry("A2", "8-K/A - BETA INC (0000000013) (Filer)", "2026-11-17T09:20:00-05:00", ["5.02"]),
+    _sec_entry("A3", "8-K - SOME LOAN TRUST 2026-1 (0000000014) (Filer)", "2026-11-17T09:10:00-05:00", ["8.01"]),
+    _sec_entry("A4", "8-K - GAMMA &amp; CO (0000000015) (Filer)", "2026-11-17T09:05:00-05:00", ["1.01"]),
+    "<entry><title>something else entirely</title><updated>2026-11-17T09:00:00-05:00</updated><id>x=A5</id></entry>",
+]) + "</feed>").encode("latin-1")
+
+
+def test_sec_filings_are_listed_once_with_ticker_and_acceptance_time(tmp_path, monkeypatch):
+    from bot import edgar as edgar_mod
+    from bot.edgar import Edgar, parse_feed as parse_sec
+
+    entries = parse_sec(SEC_FEED)
+    assert [e["acc"] for e in entries] == ["A1", "A1", "A2", "A3", "A4"]
+    assert entries[0]["cik"] == 11 and entries[0]["items"] == ["2.02", "9.01"] and entries[2]["form"] == "8-K/A"
+    assert entries[4]["company"] == "GAMMA & CO" and iso(entries[0]["accepted"]) == "2026-11-17T14:25:18Z"
+
+    async def no_sleep(_): return None
+    monkeypatch.setattr(edgar_mod.asyncio, "sleep", no_sleep)
+
+    class Resp:
+        def __init__(self, content=b"", data=None): self.content, self.data = content, data
+        def raise_for_status(self): pass
+        def json(self): return self.data
+
+    class Http:
+        def __init__(self): self.calls = []
+        async def get(self, url, params=None):
+            self.calls.append((url, (params or {}).get("start")))
+            if url.endswith("company_tickers.json"):
+                return Resp(data={"0": {"cik_str": 11, "ticker": "ACME"}, "1": {"cik_str": 13, "ticker": "BETA"},
+                                  "2": {"cik_str": 15, "ticker": "GAM"}, "3": {"cik_str": 15, "ticker": "GAMMA"}})
+            empty = b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+            return Resp(content=SEC_FEED if params["start"] == 0 else empty)
+
+    class Uni:
+        cache = {"ACME": {}, "BETA": {}, "GAMMA": {}}      # GAM is not tradable
+
+    def make(journal):
+        e = Edgar(CFG["edgar"], "someone@example.org", Uni(), journal)
+        e.http = Http()
+        return e
+
+    j = Journal(tmp_path)
+    first = make(j)
+    assert first.active and not Edgar(CFG["edgar"], "", Uni(), j).active       # no contact address: switched off
+    assert asyncio.run(first.collect()) == 2 and asyncio.run(first.collect()) == 0
+    assert first.stats["filings"] == 4 and first.stats["matched"] == 2
+    rows = [r for r in j.recent_events(1) if r["kind"] == "sec_item"]
+    assert [(r["symbol"], r["acc"], r["accepted"], r["items"]) for r in rows] == [
+        ("GAMMA", "A4", "2026-11-17T14:05:00Z", ["1.01"]), ("ACME", "A1", "2026-11-17T14:25:18Z", ["2.02", "9.01"])]
+    again = make(j)                                                             # after a restart
+    assert asyncio.run(again.collect()) == 0
+    assert len([r for r in j.recent_events(1) if r["kind"] == "sec_item"]) == 2
+
+
+def test_price_path_around_an_announcement():
+    from bot.speed import price_path, session_of
+    t0 = datetime(2026, 11, 17, 15, 0, 0, tzinfo=timezone.utc)                  # 10:00 in New York
+    at = lambda s, p, n: (t0 + timedelta(seconds=s), p, n)
+    pre = [at(-2, 100.0, 100), at(-30, 99.5, 200)]
+    post = [at(0.5, 100.2, 100), at(1.5, 100.5, 300), at(8, 101.0, 100), at(50, 102.0, 1000), at(200, 101.5, 100)]
+    p = price_path(pre, post, t0)
+    assert (p["price"], p["pre_move"], p["pre_span_s"], p["first_trade_s"]) == (100.0, 0.503, 30, 0.5)
+    assert [p[f"r{h}"] for h in (1, 2, 5, 10, 30, 60, 120, 300)] == [0.2, 0.5, 0.5, 1.0, 1.0, 2.0, 2.0, 1.5]
+    assert (p["n_0_2"], p["usd_0_2"], p["n_2_10"], p["usd_10_60"], p["n_60_300"]) == (2, 40170, 1, 102000, 1)
+    quiet = price_path(pre, [], t0)
+    assert quiet["r300"] == 0.0 and quiet["first_trade_s"] is None              # nobody traded: no move
+    assert price_path([], post, t0) is None and price_path([at(-700, 100.0, 1)], post, t0) is None
+    part = price_path(pre, post[:3], t0, covered_s=9)                           # busy stock, data cut off after 9 s
+    assert part["r5"] == 0.5 and part["r10"] is None and part["usd_0_2"] == 40170 and part["n_2_10"] is None
+    ny = lambda h, m, d=17: session_of(datetime(2026, 11, d, h, m, tzinfo=ET))
+    assert [ny(3, 59), ny(4, 0), ny(9, 29), ny(9, 30), ny(15, 59), ny(16, 0), ny(19, 59), ny(20, 0), ny(10, 0, 21)] == [
+        "closed", "pre", "pre", "regular", "regular", "post", "post", "closed", "closed"]
+
+
+def test_speed_measurement_runs_once_per_announcement(tmp_path):
+    from bot.speed import Speed
+    t0 = datetime.now(timezone.utc).replace(hour=15, minute=0, second=0, microsecond=0)   # 10:00 or 11:00 New York
+    while t0.weekday() >= 5 or t0 > datetime.now(timezone.utc) - timedelta(hours=2):
+        t0 -= timedelta(days=1)
+    night = t0.replace(hour=6)                                                  # 1:00 or 2:00 New York: no trading
+
+    class Api:
+        def __init__(self): self.calls = 0
+        async def trades(self, sym, start, end, limit=10000, sort="asc", feed="sip"):
+            self.calls += 1
+            a, b = datetime.fromisoformat(start), datetime.fromisoformat(end)
+            if sym == "DEAD":
+                return [], False
+            tr = lambda s, p: {"t": (t0 + timedelta(seconds=s)).isoformat().replace("+00:00", "Z"), "p": p, "s": 100, "c": ["@"]}
+            every = [tr(-5, 50.0), tr(1, 50.5), tr(40, 51.0), {**tr(41, 99.0), "c": ["Z"]}, tr(600, 51.5)]
+            hit = [x for x in every if a <= parse_ts(x["t"]) <= b]
+            return (hit[::-1] if sort == "desc" else hit)[:limit], False
+
+    class Uni:
+        cache = {"ACME": {}, "DEAD": {}}
+
+    class Stats:
+        async def get(self, symbols): return {"ACME": {"size": "small", "dollar_volume": 5000000}}
+
+    j, api = Journal(tmp_path), Api()
+    j.event("wire_item", id="w1", symbol="ACME", published=iso(t0), headline="Acme wins contract", source="prnewswire")
+    j.event("wire_item", id="w1", symbol="ACME", published=iso(t0), headline="Acme wins contract", source="prnewswire")  # logged again after a restart
+    j.event("wire_item", id="w2", symbol="DEAD", published=iso(t0), headline="x", source="prnewswire")
+    j.event("wire_item", id="w3", symbol="GONE", published=iso(t0), headline="x", source="prnewswire")   # not tradable
+    j.event("sec_item", acc="S1", symbol="ACME", accepted=iso(night), items=["2.02"])
+    j.event("sec_item", acc="S2", symbol="ACME", accepted=iso(datetime.now(timezone.utc)), items=["8.01"])  # too fresh
+    sp = Speed(api, CFG["speed"], j, Uni(), Stats())
+    assert asyncio.run(sp.run()) == 1
+    calls = api.calls
+    assert asyncio.run(sp.run()) == 0 and api.calls == calls                    # nothing is measured twice
+    rows = {r["ref"]: r for r in j.recent_events(1) if r["kind"] == "news_speed"}
+    assert set(rows) == {"w1", "w2", "S1"}
+    r = rows["w1"]
+    assert (r["src"], r["symbol"], r["session"], r["size"], r["price"]) == ("prnewswire", "ACME", "regular", "small", 50.0)
+    assert (r["r1"], r["r30"], r["r60"], r["r300"], r["r900"], r["r1800"]) == (1.0, 1.0, 2.0, 2.0, 3.0, 3.0)
+    assert rows["w2"]["skipped"] == "no_trade_before" and rows["S1"]["skipped"] == "market_closed"
+    done = [x for x in j.recent_events(1) if x["kind"] == "speed_done"]
+    assert len(done) == 1 and (done[0]["due"], done[0]["measured"], done[0]["skipped"], done[0]["errors"]) == (3, 1, 2, 0)
+
+
+def test_speed_statistics_show_what_is_left_for_a_late_entry():
+    from tools.weekly_stats import speed_stats
+    rows = [
+        {"r300": 2.0, "r2": 0.1, "r10": 0.5, "r60": 1.5, "r120": 1.8, "r1800": 2.5, "pre_move": 0.1, "usd_0_2": 1000, "usd_2_10": 4000},
+        {"r300": -3.0, "r2": -1.0, "r10": -2.0, "r60": -3.5, "r120": -3.0, "r1800": -1.0, "pre_move": -0.4, "usd_0_2": 0, "usd_2_10": 2000},
+        {"r300": 0.3, "r2": 0.0, "r10": 0.1, "r60": 0.2, "r120": 0.3, "r1800": 0.1, "pre_move": 0.0},
+        {"skipped": "no_trade_before"},
+    ]
+    s = speed_stats(rows)
+    assert (s["n"], s["skipped"], s["movers"], s["move_300"]) == (3, 1, 2, 3.0)
+    assert (s["left_after_2s"], s["left_after_10s"], s["left_after_60s"], s["left_after_120s"]) == (2.0, 1.5, 0.5, 0.2)
+    assert s["before_publication"] == 0.4 and s["after_30min"] == 2.5 and s["usd_first_10s"] == 5000
+    assert speed_stats([])["n"] == 0

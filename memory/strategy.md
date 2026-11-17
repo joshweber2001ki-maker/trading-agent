@@ -137,8 +137,22 @@ Josh will deutlich schneller nach einer Meldung handeln. Was gemessen ist:
   Handelszeit ein, 151 davor und 199 danach. Der Bot handelt nur in der regulären Handelszeit.
 - **Schnelle Quellen kosten Geld:** RTPR (alle vier großen Verteiler, laut Anbieter unter
   0,5 Sekunden, 139 $/Monat nach 7 Tagen Test); WireAlpha (laut Anbieter kostenlos, ungeprüft).
-- Jede zugeordnete Pressemitteilung wird ab 18.11. mit Veröffentlichungszeit protokolliert
-  (`wire_item`), damit sich später im Sekundentakt nachmessen lässt, wie schnell der Kurs reagiert.
+
+**Tempo-Messung (läuft ab dem Abend des 17.11., kein Einfluss auf den Handel).** Der Bot schreibt
+jede zugeordnete Pressemitteilung mit Veröffentlichungszeit mit (`wire_item`) und jede
+Pflichtmitteilung an die SEC mit Annahmezeit (`sec_item`, `bot/edgar.py`). Einmal täglich,
+25 Minuten nach Börsenschluss, misst `bot/speed.py` zu jeder dieser Meldungen aus den einzelnen
+Abschlüssen des gesamten Marktes (kostenlos, sobald sie 15 Minuten alt sind): Kurs nach 1, 2, 5,
+10, 30, 60, 120 und 300 Sekunden sowie nach 15 und 30 Minuten, gehandelter Umsatz in den ersten
+Sekunden, Bewegung kurz vor der Veröffentlichung (`news_speed`). Gemessen wird auch vor- und
+nachbörslich. Die Wochenstatistik zeigt daraus, wie viel der Bewegung noch zu holen ist, wenn man
+2, 10, 60 oder 120 Sekunden nach der Meldung einsteigt. Das entscheidet, ob eine schnelle
+Nachrichtenquelle ihr Geld wert ist.
+
+**Mit Josh am 17.11. vereinbarter Ablauf:** diese Woche messen; parallel Vorschlag für
+Sofort-Einstieg und Handel außerhalb der regulären Zeit ausarbeiten (Josh gibt frei); am Montag,
+23.11., den 7-Tage-Test von RTPR starten, falls die Messung dafür spricht, und an Tag 6 kündigen,
+wenn die Zahlen es nicht tragen.
 
 ## Bekannte Schwächen des Tests
 
@@ -176,6 +190,8 @@ Josh will deutlich schneller nach einer Meldung handeln. Was gemessen ist:
 - 2026-11-17, 15:45 Uhr deutscher Zeit: Josh hat Alpaca- und Anthropic-Schlüssel erneuert. Durch
   den Neustart läuft die Version mit Wirkungs-Stufe schon seit dem Nachmittag des 17.11.; die
   Ausbruchs-Strategie war damit für diesen Tag beendet.
+- 2026-11-17 (ohne Einfluss auf den Handel, aktiv ab dem Abend): Tempo-Messung und Liste der
+  SEC-Meldungen eingebaut.
 - Erster Handelstag (17.11.), zwei Trades der Ausbruchs-Strategie, je rund 102.000 $ groß:
   JPM short, nach 66 Sekunden ausgestoppt (−364 $; der Stop wurde 0,05 % schlechter ausgeführt
   als gesetzt). PEP short, 11 Sekunden nach dem Einstieg von Hand im Alpaca-Dashboard

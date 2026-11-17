@@ -9,6 +9,7 @@ User=trader
 WorkingDirectory=/opt/trading-agent
 EnvironmentFile=/etc/trading-bot/alpaca.env
 EnvironmentFile=-/etc/trading-bot/llm.env
+EnvironmentFile=-/etc/trading-bot/sec.env
 Environment=BOT_DATA_DIR=/var/lib/trading-bot
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/trading-agent/.venv/bin/python -m bot.main

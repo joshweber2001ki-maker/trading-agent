@@ -5,17 +5,18 @@ import logging
 import signal
 import subprocess
 import time
-from datetime import timedelta
 
 import websockets
 
 from .alpaca import Alpaca
 from .common import DATA, ROOT, Journal, env, load_config, log, now, spawn
+from .edgar import Edgar
 from .executor import Executor
 from .llm import Classifier
 from .market import Session, StockStats, Universe
 from .news_strategy import OUTCOME_DELAY_MIN, NewsStrategy
 from .orb_strategy import OrbStrategy
+from .speed import Speed
 from .wires import Wires
 
 NEWS_WS = "wss://stream.data.alpaca.markets/v1beta1/news"
@@ -40,8 +41,12 @@ class Bot:
             stats=StockStats(self.api),
         )
         self.wires = Wires(self.cfg["wires"], self.universe, self.news.on_article, self.journal)
+        # Measurement only, no trading: SEC filings as a list, and how fast prices react to announcements.
+        self.edgar = Edgar(self.cfg["edgar"], env("SEC_CONTACT", ""), self.universe, self.journal)
+        self.speed = Speed(self.api, self.cfg["speed"], self.journal, self.universe, self.news.stock_stats)
         self.day = None
         self.outcomes_day = None
+        self.speed_day = None
         self.flattened = False
         self.start_equity = None
         self.errors = 0
@@ -98,11 +103,8 @@ class Bot:
                         await self.orb.step()
                 elif self.session.trading_day and now() < self.session.open:
                     await self.orb.step()
-                elif (self.session.trading_day and self.outcomes_day != self.day
-                      and now() >= self.session.close + timedelta(minutes=OUTCOME_DELAY_MIN)):
-                    # Once per day (again after a restart; finished articles are skipped).
-                    self.outcomes_day = self.day
-                    spawn(self.news.log_outcomes())
+                elif self.session.trading_day and now() >= self.session.close:
+                    self.after_close()
             except Exception as e:
                 self.errors += 1
                 self.journal.event("error", where="control", error=repr(e)[:300])
@@ -114,13 +116,24 @@ class Bot:
                     log.warning("status not written: %r", e)
             await asyncio.sleep(poll)
 
+    def after_close(self):
+        """Measurements that need whole-market data, which is free once it is 15 minutes old.
+        Each runs once per day (again after a restart; what is already measured is skipped)."""
+        since = (now() - self.session.close).total_seconds() / 60
+        if self.outcomes_day != self.day and since >= OUTCOME_DELAY_MIN:
+            self.outcomes_day = self.day
+            spawn(self.news.log_outcomes())
+        if self.speed_day != self.day and self.cfg["speed"]["enabled"] and since >= self.cfg["speed"]["after_close_min"]:
+            self.speed_day = self.day
+            spawn(self.speed.run())
+
     def write_status(self):
         s = self.session
         self.journal.status({
             "version": self.version, "day": self.day, "trading_day": s.trading_day,
             "market_open": s.is_open(), "news_stream": self.ws_connected,
             "llm_available": self.llm.available, "llm_calls_today": self.llm.day_calls,
-            "news": self.news.stats, "wires": self.wires.stats,
+            "news": self.news.stats, "wires": self.wires.stats, "edgar": self.edgar.stats,
             "orb_stage": self.orb.stage, "orb_pool": len(self.orb.pool), "orb_watching": sorted(self.orb.ranges),
             "open_trades": [
                 {"symbol": t.symbol, "strategy": t.strategy, "side": t.side, "qty": t.qty, "status": t.status}
@@ -138,6 +151,7 @@ class Bot:
         self.news.reset_day()
         self.orb.reset_day()
         self.wires.reset_day()
+        self.edgar.reset_day()
         self.llm.reset_day()
         try:
             universe = await self.universe.load()
@@ -181,7 +195,7 @@ class Bot:
         log.info("bot started; llm=%s day=%s trading_day=%s", self.llm.available, self.session.day, self.session.trading_day)
         if not self.llm.available:
             log.warning("ANTHROPIC_API_KEY fehlt: News-Strategie inaktiv, nur Ausbruchs-Strategie läuft")
-        await asyncio.gather(self.news_loop(), self.control_loop(), self.wires.run())
+        await asyncio.gather(self.news_loop(), self.control_loop(), self.wires.run(), self.edgar.run())
 
 
 def main():

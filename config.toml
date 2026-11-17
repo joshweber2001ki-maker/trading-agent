@@ -108,6 +108,23 @@ feeds = [
   "https://www.prnewswire.com/rss/general-business-latest-news/personnel-announcements-list.rss",
 ]
 
+[edgar]
+# Pflichtmitteilungen an die US-Börsenaufsicht SEC (Formular 8-K): nur mitschreiben, nicht handeln.
+# Läuft nur, wenn auf dem Server eine Kontaktadresse hinterlegt ist (/etc/trading-bot/sec.env,
+# SEC_CONTACT=...); die SEC verlangt sie bei automatischen Abfragen.
+enabled   = true
+poll_s    = 600    # alle 10 Minuten nach neuen Meldungen sehen
+max_pages = 8      # je 100 Meldungen; der Feed reicht etwa anderthalb Tage zurück
+
+[speed]
+# Tempo-Messung einmal täglich nach Börsenschluss: Kursverlauf im Sekundentakt nach jeder
+# Pressemitteilung und SEC-Meldung, aus Handelsdaten des gesamten Marktes (kostenlos, sobald sie
+# 15 Minuten alt sind). Kein Einfluss auf den Handel.
+enabled         = true
+after_close_min = 25
+lookback_days   = 5      # so weit zurück werden noch nicht gemessene Meldungen nachgeholt
+max_events      = 1500   # höchstens so viele Meldungen pro Lauf
+
 [llm]
 model              = "claude-haiku-5-5"
 thinking           = false   # true = gründlicher, aber mehrere Sekunden langsamer

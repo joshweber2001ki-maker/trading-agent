@@ -121,6 +121,9 @@ Paper-Ergebnisse sind eine Obergrenze.
 - **Neu, Wunsch von Josh:** deutlich schneller nach einer Meldung handeln, ohne Kosten
   (Testabos sind in Ordnung). Messungen dazu stehen in `memory/strategy.md` unter „Tempo".
   Daraus die Vorschläge V12 bis V15 unten.
+- **V12 umgesetzt (17.11.):** Die Tempo-Messung läuft ab dem Abend des 17.11. (`news_speed`,
+  Abschnitt „Tempo" der Wochenstatistik). Josh hat den Ablauf freigegeben: diese Woche messen,
+  am Montag, 23.11., den RTPR-Test starten (V14), falls die Messung dafür spricht.
 - Alle übrigen Vorschläge sind offen.
 
 ## Vorschläge (Entscheidung Josh)

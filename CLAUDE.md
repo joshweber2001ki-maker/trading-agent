@@ -21,11 +21,14 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API |
 | `bot/wires.py` | zweite Nachrichtenquelle: Pressemitteilungen von PR Newswire, Firmenname → Börsenkürzel |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
+| `bot/edgar.py` | Liste der Pflichtmitteilungen an die SEC (Formular 8-K) mit Annahmezeit; nur Messung, kein Handel |
+| `bot/speed.py` | Tempo-Messung nach Börsenschluss: Kursverlauf im Sekundentakt nach jeder Meldung; kein Handel |
 | `tools/check.py` | Verbindungstest |
 | `tools/guard.py` | Feierabend-Wächter: schließt kurz vor Börsenschluss alles, falls der Bot es nicht getan hat |
 | `tools/weekly_stats.py` | Wochenstatistik aus den Protokollen |
 | `tools/backtest_orb.py` | grobe Rückrechnung der Ausbruchs-Strategie (braucht Alpaca-Schlüssel) |
 | `tools/replay_news.py` | einen vergangenen Tag durch die News-Strategie spielen (braucht beide Schlüssel) |
+| `tools/speed_check.py` | eine einzelne Meldung von Hand nachmessen (braucht Alpaca-Schlüssel) |
 | `deploy/` | Installation, Dienste, stündlicher Abgleich mit GitHub |
 | `memory/strategy.md` | die Strategie in Worten, mit Begründung der Startwerte |
 | `logs/` | Protokolle des Servers (werden stündlich vom Server hochgeladen) |
@@ -34,8 +37,10 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 
 ## Regeln für die Arbeit an diesem Repo
 
-- **Keine Zugangsdaten ins Repo.** Sie liegen nur auf dem Server unter `/etc/trading-bot/`
-  (eintragen mit `deploy/set-keys.sh`). In der Git-Historie stehen noch alte, öffentliche
+- **Keine Zugangsdaten und keine persönlichen Daten ins Repo.** Schlüssel liegen nur auf dem
+  Server unter `/etc/trading-bot/` (eintragen mit `deploy/set-keys.sh`), ebenso Joshs
+  Kontaktadresse für Abfragen bei der SEC (`sec.env`, `SEC_CONTACT=...`). Werkzeuge, die
+  Schlüssel brauchen, laufen auf dem Server: `bash deploy/run-tool.sh tools/<datei>.py ...`. In der Git-Historie stehen noch alte, öffentliche
   Paper-Keys; sie gelten als kompromittiert.
 - **Strategieänderungen erst vorschlagen, dann umsetzen.** Josh will Änderungen an
   `config.toml` oder an der Handelslogik vorher sehen und freigeben. Fehlerbehebungen ohne
@@ -59,6 +64,8 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 - `logs/status.json` – Lebenszeichen des Bots (jede Minute neu, stündlich hochgeladen)
 - `logs/trades.jsonl` – ein Eintrag je abgeschlossenem Trade
 - `logs/events-JJJJ-MM-TT.jsonl` – alle Entscheidungen: jede zugeordnete Pressemitteilung mit
-  Veröffentlichungszeit (`wire_item`), bewertete Meldungen (`news_classified`), Kursverlauf
-  danach (`news_outcome`), abgelehnte Signale mit Grund, Fehler, Eingriffe des Wächters (`guard`)
+  Veröffentlichungszeit (`wire_item`), jede SEC-Meldung mit Annahmezeit (`sec_item`), der
+  Kursverlauf im Sekundentakt danach (`news_speed`), bewertete Meldungen (`news_classified`),
+  Kursverlauf in Minuten danach (`news_outcome`), abgelehnte Signale mit Grund, Fehler,
+  Eingriffe des Wächters (`guard`)
 - `logs/daily/JJJJ-MM-TT.json` – Tagesabschluss

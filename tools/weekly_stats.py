@@ -82,6 +82,33 @@ def outcome_stats(rows):
     return out
 
 
+MOVER_PCT = 1.0     # an announcement counts as a mover if the price is at least this far away after 5 minutes
+SESSIONS = {"pre": "vorbörslich", "regular": "Handelszeit", "post": "nachbörslich"}
+
+
+def speed_stats(rows):
+    """How much of the move after an announcement is left for someone who gets in later.
+
+    Looks only at announcements after which the price had moved by MOVER_PCT within 5 minutes,
+    and assumes the direction is known. That makes every number an upper bound.
+    """
+    def med(xs):
+        xs = sorted(x for x in xs if x is not None)
+        return round(xs[len(xs) // 2], 2) if xs else None
+
+    ok = [r for r in rows if not r.get("skipped") and r.get("r300") is not None]
+    movers = [r for r in ok if abs(r["r300"]) >= MOVER_PCT]
+    sign = lambda r: 1 if r["r300"] > 0 else -1
+    out = {"n": len(ok), "skipped": sum(1 for r in rows if r.get("skipped")), "movers": len(movers),
+           "move_300": med(abs(r["r300"]) for r in movers),
+           "before_publication": med(r["pre_move"] * sign(r) for r in movers if r.get("pre_move") is not None),
+           "after_30min": med(r["r1800"] * sign(r) for r in movers if r.get("r1800") is not None),
+           "usd_first_10s": med((r.get("usd_0_2") or 0) + (r.get("usd_2_10") or 0) for r in movers)}
+    for h in (2, 10, 60, 120):
+        out[f"left_after_{h}s"] = med((r["r300"] - r[f"r{h}"]) * sign(r) for r in movers if r.get(f"r{h}") is not None)
+    return out
+
+
 def build(root: Path, start: date, end: date):
     days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
     trades = [
@@ -107,6 +134,7 @@ def build(root: Path, start: date, end: date):
     errors = Counter(e.get("where", "?") for e in events if e["kind"] == "error")
     classified = [e for e in events if e["kind"] == "news_classified"]
     outcomes = [e for e in events if e["kind"] == "news_outcome"]
+    speed = [e for e in events if e["kind"] == "news_speed"]
     news_trades = by_strategy.get("news", [])
     by_category = defaultdict(list)
     for t in news_trades:
@@ -157,6 +185,15 @@ def build(root: Path, start: date, end: date):
                                         and (o.get("confidence") or 0) >= 6]),
             "by_source": {src: outcome_stats([o for o in outcomes if o.get("source") == src])
                           for src in sorted({o.get("source") or "?" for o in outcomes})},
+        },
+        "speed": {
+            "all": speed_stats(speed),
+            "by_source": {k: speed_stats([r for r in speed if r.get("src") == k])
+                          for k in sorted({r.get("src") or "?" for r in speed})},
+            "by_session": {SESSIONS.get(k, k): speed_stats([r for r in speed if r.get("session") == k])
+                           for k in ("pre", "regular", "post") if any(r.get("session") == k for r in speed)},
+            "by_size": {k: speed_stats([r for r in speed if r.get("size") == k])
+                        for k in ("small", "mid-sized", "large", "very large") if any(r.get("size") == k for r in speed)},
         },
         "guard_interventions": sum(1 for e in events if e["kind"] == "guard"),
         "rejections": dict(rejections.most_common()),
@@ -209,6 +246,24 @@ def markdown(r):
             f"- gesamt: {fo(rv['all'])}", f"- wie gehandelt würde (Richtung, Wirkung >= 1, Überraschung >= 7, Sicherheit >= 6): {fo(rv['tradeable'])}"]
     out += [f"- Wirkung {k}: {fo(v)}" for k, v in rv["by_impact"].items()]
     out += [f"- Quelle {k}: {fo(v)}" for k, v in rv["by_source"].items()]
+    def fs(o):
+        if not o["n"]:
+            return "keine Daten"
+        if not o["movers"]:
+            return f'{o["n"]} Meldungen gemessen, keine mit mindestens {MOVER_PCT:g} % Bewegung in 5 Minuten'
+        return (f'{o["n"]} Meldungen gemessen, {o["movers"]} mit mindestens {MOVER_PCT:g} % Bewegung in 5 Minuten. Bei diesen: '
+                f'Bewegung nach 5 min {o["move_300"]} %; davon noch zu holen bei Einstieg nach 2 s / 10 s / 60 s / 120 s = '
+                f'{o["left_after_2s"]} / {o["left_after_10s"]} / {o["left_after_60s"]} / {o["left_after_120s"]} Prozentpunkte; '
+                f'schon vor der Veröffentlichung gelaufen {o["before_publication"]} %; Stand nach 30 min {o["after_30min"]} %; '
+                f'Umsatz in den ersten 10 s {o["usd_first_10s"]} $')
+
+    sp = r["speed"]
+    out += ["", "## Tempo: Kursverlauf im Sekundentakt nach Pressemitteilungen und SEC-Meldungen",
+            "(Mittelwerte sind Mediane. Richtung und Auswahl gelten als bekannt, die Zahlen sind also Obergrenzen.)",
+            f"- gesamt: {fs(sp['all'])}"]
+    out += [f"- Quelle {k}: {fs(v)}" for k, v in sp["by_source"].items()]
+    out += [f"- {k}: {fs(v)}" for k, v in sp["by_session"].items()]
+    out += [f"- Firmengröße {k}: {fs(v)}" for k, v in sp["by_size"].items()]
     out += ["", "## Ausbruchs-Strategie",
             f'- in Richtung der Kurslücke: {fmt(r["orb"]["with_gap"])}',
             f'- gegen die Kurslücke: {fmt(r["orb"]["against_gap"])}',

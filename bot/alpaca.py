@@ -165,6 +165,18 @@ class Alpaca:
             if not tok:
                 return out
 
+    async def trades(self, symbol, start, end, limit=10000, sort="asc", feed="sip"):
+        """Individual trades of one symbol between two times, at most `limit` of them.
+
+        Whole-market data ("sip") is free on the basic plan once it is 15 minutes old.
+        Returns (trades, truncated): truncated means there were more than `limit`.
+        """
+        d = await self._req(
+            "GET", f"{DATA}/v2/stocks/{symbol}/trades",
+            params={"start": start, "end": end, "limit": limit, "sort": sort, "feed": feed},
+        ) or {}
+        return d.get("trades") or [], bool(d.get("next_page_token"))
+
     async def movers(self, top=20):
         return await self._req(
             "GET", f"{DATA}/v1beta1/screener/stocks/movers", params={"top": top}

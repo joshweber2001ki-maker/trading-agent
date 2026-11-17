@@ -3,7 +3,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -78,6 +78,20 @@ class Journal:
         self._append(self.dir / f"events-{day}.jsonl", {"t": iso(t), "kind": kind, **data})
         if kind in ("error", "trade_open", "trade_closed", "halt", "orphan"):
             log.info("%s %s", kind, json.dumps(data, default=str)[:300])
+
+    def recent_events(self, days: int = 1):
+        """Rows of the last `days` daily event files (New York dates), oldest first. Damaged lines are skipped."""
+        today = now().astimezone(ET).date()
+        for back in range(days - 1, -1, -1):
+            path = self.dir / f"events-{(today - timedelta(days=back)).isoformat()}.jsonl"
+            if not path.exists():
+                continue
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        yield json.loads(line)
+                    except ValueError:
+                        continue
 
     def trade(self, row: dict):
         self._append(self.dir / "trades.jsonl", row)
