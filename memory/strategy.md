@@ -195,7 +195,8 @@ wenn die Zahlen es nicht tragen.
 - Erster Handelstag (17.11.), zwei Trades der Ausbruchs-Strategie, je rund 102.000 $ groß:
   JPM short, nach 66 Sekunden ausgestoppt (−364 $; der Stop wurde 0,05 % schlechter ausgeführt
   als gesetzt). PEP short, Sekunden nach dem Einstieg durch eine Kauforder aus dem
-  Alpaca-Dashboard geschlossen (−35,75 $). Der Bot bemerkte das nicht, führte PEP weiter als
+  Alpaca-Dashboard geschlossen (−35,75 $; laut Josh ein Versehen von ihm, kein fremder
+  Zugriff). Der Bot bemerkte das nicht, führte PEP weiter als
   offen und buchte neun Minuten später einen Stop-Ausstieg zu einem geschätzten Kurs
   (`stop_sw_unconfirmed`, −507,65 $). Diesen Verlust gab es nie: Der Depotwert fiel durch PEP
   nur um 35,75 $. Echtes Ergebnis der beiden Trades: −399,81 $.
