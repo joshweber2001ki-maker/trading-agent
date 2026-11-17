@@ -1,21 +1,21 @@
 {
- "t": "2026-11-17T10:38:24Z",
+ "t": "2026-11-17T11:06:25Z",
  "version": "4375ff55292c5a52ac64691ea55037b845a9ce3a",
  "day": "2026-11-17",
  "trading_day": true,
  "market_open": false,
  "news_stream": true,
  "llm_available": true,
- "llm_calls_today": 0,
+ "llm_calls_today": 1,
  "news": {
-  "received": 0,
-  "classified": 0,
+  "received": 9,
+  "classified": 1,
   "candidates": 0
  },
  "orb_stage": "idle",
  "orb_watching": [],
  "open_trades": [],
  "trades_today": 0,
- "errors_today": 0,
+ "errors_today": 1,
  "flattened": false
 }

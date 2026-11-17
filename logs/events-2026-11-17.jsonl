@@ -4,3 +4,5 @@
 {"t": "2026-11-17T10:38:21Z", "kind": "orphan", "symbol": "NVDA", "qty": "24", "action": "closed"}
 {"t": "2026-11-17T10:38:23Z", "kind": "orphan", "symbol": "V", "qty": "15", "action": "closed"}
 {"t": "2026-11-17T10:38:24Z", "kind": "day_start", "day": "2026-11-17", "trading_day": true, "universe": 12676, "equity": 102481.39, "llm": true, "news": true, "orb": true}
+{"t": "2026-11-17T11:00:32Z", "kind": "error", "where": "news_ws", "error": "ConnectionClosedError(None, None, None)"}
+{"t": "2026-11-17T11:02:35Z", "kind": "news_classified", "article": 124266418, "headline": "BHP Employee Reported Missing During Work Trip to Brisbane", "source": "fiscal.ai", "phase": "premarket", "symbol": "BHP", "verdict": {"symbol": "BHP", "direction": "none", "surprise": 1, "confidence": 8, "category": "other", "reason": "Missing employee report is a personal, non-financial story with no clear market impact on BHP's business."}, "age_s": 50, "llm_s": 1.0}
