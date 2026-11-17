@@ -299,6 +299,7 @@ class FakeUniverse:
 class FakeApi:
     def __init__(self):
         self.orders, self.price, self.cancelled, self.closed = {}, 100.0, [], []
+        self.gone, self.manual = set(), {}     # positions closed by hand, and the orders that closed them
         self.acct = {"equity": "100000", "last_equity": "100000", "buying_power": "400000"}
     async def account(self): return self.acct
     async def submit(self, p):
@@ -328,6 +329,8 @@ class FakeApi:
         return self.orders[oid]
     async def snapshot(self, sym): return {"latestTrade": {"p": self.price}}
     async def positions(self): return []
+    async def position(self, sym): return None if sym in self.gone else {"symbol": sym}
+    async def closed_orders(self, sym, after): return self.manual.get(sym, [])
     async def open_orders(self): return []
     def fill(self, oid, price, qty):
         o = self.orders[oid]
@@ -424,6 +427,37 @@ def test_time_stop_and_eod_flatten(rig):
     assert [r["exit_reason"] for r in rows] == ["time", "eod"]
     assert rows[0]["pnl"] == pytest.approx(200.0) and rows[1]["pnl"] == pytest.approx(-150.0)
     assert set(api.closed) == {"ACME", "BETA"} and not ex.trades
+
+
+def test_position_closed_by_hand_is_recorded_with_its_real_price(rig):
+    api, sess, ex, tmp = rig
+    async def go():
+        await ex.enter({**SIG, "side": "short", "stop": 101.0})
+        api.fill("o0", 100.0, 500)
+        await ex.manage()
+        for leg in api.orders["o0"]["legs"]:          # closing by hand cancels both legs ...
+            leg["status"] = "canceled"
+        api.gone.add("ACME")                          # ... and the position is gone
+        api.manual["ACME"] = [
+            {"id": "x9", "side": "sell", "status": "filled", "filled_avg_price": "99.0", "filled_at": None},   # not a closing order
+            {"id": "x1", "side": "buy", "status": "filled", "filled_avg_price": "100.05",
+             "filled_at": iso(datetime.now(timezone.utc))},
+            {"id": "o0", "side": "sell", "status": "filled", "filled_avg_price": "100.0", "filled_at": None},  # our own entry
+        ]
+        await ex.manage()
+        # legs gone but the position still there (partly filled entry): the software stop stays in charge
+        await ex.enter({**SIG, "symbol": "BETA"})
+        api.fill("o1", 100.0, 500)
+        await ex.manage()
+        for leg in api.orders["o1"]["legs"]:
+            leg["status"] = "canceled"
+        api.price = 98.9
+        await ex.manage()
+    asyncio.run(go())
+    rows = trades_file(tmp)
+    assert [(r["symbol"], r["exit_reason"]) for r in rows] == [("ACME", "external"), ("BETA", "stop_sw")]
+    assert rows[0]["exit_price"] == 100.05 and rows[0]["pnl"] == pytest.approx(-25.0) and not ex.trades
+    assert api.closed == ["BETA"]                     # nothing is sent for a position that no longer exists
 
 
 def test_risk_limits(rig):

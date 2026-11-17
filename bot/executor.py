@@ -238,12 +238,20 @@ class Executor:
                 await self._record(t, float(leg["filled_avg_price"]), reason, leg.get("filled_at"))
                 return
 
+        unprotected = not any(l["status"] in LIVE for l in legs)
+        if unprotected and await self.api.position(t.symbol) is None:
+            # The legs are gone and so is the position: somebody closed it outside the bot
+            # (by hand in the broker's dashboard, which also cancels the legs).
+            price, when = await self._external_exit(t)
+            await self._record(t, price, "external" if when else "external_unconfirmed", when)
+            return
+
         held_min = (now() - parse_ts(t.entry_time)).total_seconds() / 60
         if self.flatten_due():
             await self.exit_now(t, "eod", legs)
         elif t.max_hold_min and held_min >= t.max_hold_min:
             await self.exit_now(t, "time", legs)
-        elif not any(l["status"] in LIVE for l in legs):
+        elif unprotected:
             # No protective orders at the broker (e.g. partial fill then cancel): guard in software.
             snap = await self.api.snapshot(t.symbol)
             p = float(snap["latestTrade"]["p"]) if snap and snap.get("latestTrade") else 0
@@ -251,6 +259,19 @@ class Executor:
                 await self.exit_now(t, "stop_sw", legs)
             elif p and (p - t.target_price) * t.dirn >= 0:
                 await self.exit_now(t, "target_sw", legs)
+
+    async def _external_exit(self, t: Trade):
+        """Price and time of the order that closed this position outside the bot, if it can be found."""
+        closing_side = "sell" if t.side == "long" else "buy"
+        try:
+            for o in await self.api.closed_orders(t.symbol, t.entry_time):
+                if o.get("side") == closing_side and o.get("status") == "filled" and o.get("id") != t.order_id \
+                        and o.get("filled_avg_price"):
+                    return float(o["filled_avg_price"]), o.get("filled_at")
+        except Exception as e:
+            self.journal.event("error", where="external_exit", id=t.id, error=repr(e)[:200])
+        snap = await self.api.snapshot(t.symbol)
+        return (float(snap["latestTrade"]["p"]) if snap and snap.get("latestTrade") else t.entry_price), None
 
     async def exit_now(self, t: Trade, reason: str, legs=None):
         if legs is None:

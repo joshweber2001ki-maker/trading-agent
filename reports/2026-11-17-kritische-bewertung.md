@@ -79,6 +79,8 @@ Vergleich für den 16.11., 26 Aktien:
    Tag rund −4 % möglich, bei Kurssprüngen mehr.
 6. **Klumpen:** Die feste Liste ist überwiegend Technologie. Vier Positionen in dieselbe
    Richtung sind eine einzige Wette mit bis zu dreifachem Hebel.
+8. **Von Hand geschlossene Positionen** bemerkte der Bot nicht (aufgefallen am 17.11. bei PEP).
+   **Behoben am 17.11.:** Er erkennt sie und verbucht den echten Schlusskurs (`external`).
 7. **Folgekurse** (`news_outcome`) wurden mit IEX-Kursen gemessen. **Behoben am 17.11.:**
    Messung jetzt einmal nach Börsenschluss mit Kursen des Gesamtmarkts.
 

@@ -173,3 +173,14 @@ Josh will deutlich schneller nach einer Meldung handeln. Was gemessen ist:
   offenen Vorschlägen in `reports/2026-11-17-kritische-bewertung.md`.
 - 2026-11-17 (Entscheidung Josh, aktiv ab 18.11.): Ausbruchs-Strategie abgeschaltet.
   Pressemitteilungen werden mit Veröffentlichungszeit protokolliert (`wire_item`).
+- 2026-11-17, 15:45 Uhr deutscher Zeit: Josh hat Alpaca- und Anthropic-Schlüssel erneuert. Durch
+  den Neustart läuft die Version mit Wirkungs-Stufe schon seit dem Nachmittag des 17.11.; die
+  Ausbruchs-Strategie war damit für diesen Tag beendet.
+- Erster Handelstag (17.11.), zwei Trades der Ausbruchs-Strategie, je rund 102.000 $ groß:
+  JPM short, nach 66 Sekunden ausgestoppt (−364 $; der Stop wurde 0,05 % schlechter ausgeführt
+  als gesetzt). PEP short, 11 Sekunden nach dem Einstieg von Hand im Alpaca-Dashboard
+  geschlossen (−36 $). Der Bot bemerkte das nicht und führte PEP weiter als offen; die damals
+  laufende Version bucht so eine Position beim Zeitlimit mit geschätztem Kurs aus
+  (Ausstiegsgrund endet auf `_unconfirmed`), das ist kein echtes Ergebnis.
+  Behoben (aktiv ab 18.11.): Von Hand geschlossene Positionen werden erkannt und mit dem
+  echten Schlusskurs verbucht (Ausstiegsgrund `external`).

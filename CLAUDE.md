@@ -47,6 +47,9 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
   würde Positionen der ersten als fremd ansehen und schließen.
 - **Auslieferung:** Push auf `main` genügt. Der Server holt Änderungen stündlich
   (`deploy/sync.sh`) und startet den Bot nur außerhalb der US-Handelszeit neu.
+- **Nicht von Hand im Alpaca-Dashboard handeln, solange der Bot läuft.** Der Bot erkennt eine
+  von Hand geschlossene Position und verbucht sie mit dem Ausstiegsgrund `external`; fremde
+  Positionen schließt er beim nächsten Start oder vor Börsenschluss. Zum Anhalten die Notbremse nutzen.
 - **Notbremse:** Datei `/var/lib/trading-bot/HALT` auf dem Server anlegen = keine neuen
   Einstiege. `systemctl stop trading-bot` beendet den Bot; offene Positionen sind über Stop-
   und Zielorders beim Broker abgesichert.

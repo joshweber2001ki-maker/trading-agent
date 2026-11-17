@@ -92,6 +92,13 @@ class Alpaca:
     async def open_orders(self):
         return await self._req("GET", self._t("/orders"), params={"status": "open", "limit": 200})
 
+    async def closed_orders(self, symbol, after):
+        """Finished orders (filled, cancelled, ...) of one symbol submitted after `after`, newest first."""
+        return await self._req(
+            "GET", self._t("/orders"),
+            params={"status": "closed", "symbols": symbol, "after": after, "limit": 50, "direction": "desc"},
+        ) or []
+
     async def order(self, order_id):
         return await self._req("GET", self._t(f"/orders/{order_id}"), params={"nested": "true"})
 
