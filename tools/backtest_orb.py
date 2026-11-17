@@ -7,7 +7,9 @@
 It uses the same selection and stop rules as the live bot (imported from bot/), on the fixed
 symbol list from config.toml. Read the result as a sanity check, not as a forecast:
 - only the fixed list is tested (the live bot also adds the day's movers and news names),
-- prices come from the IEX feed only, fills are assumed at the trigger price plus --slip,
+- prices come from the IEX feed, which is what the bot sees live on the free plan; --feed sip
+  uses the whole market instead (free for data older than 15 minutes) and shows how much of a
+  result depends on the data source; fills are assumed at the trigger price plus --slip,
 - when stop and target fall into the same minute, the stop is assumed to come first.
 """
 import argparse
@@ -31,15 +33,15 @@ DATA = "https://data.alpaca.markets"
 CACHE = Path(os.environ.get("BACKTEST_CACHE", "/tmp/orb_backtest_cache"))
 
 
-def fetch(client, sym, start, end):
+def fetch(client, sym, start, end, feed="iex"):
     """All 1-minute bars of one symbol, cached on disk."""
     CACHE.mkdir(parents=True, exist_ok=True)
-    f = CACHE / f"{sym}_{start[:10]}_{end[:10]}.json"
+    f = CACHE / f"{sym}{'' if feed == 'iex' else '_' + feed}_{start[:10]}_{end[:10]}.json"
     if f.exists():
         return json.loads(f.read_text())
     bars, tok = [], None
     while True:
-        p = {"timeframe": "1Min", "start": start, "end": end, "feed": "iex", "limit": 10000}
+        p = {"timeframe": "1Min", "start": start, "end": end, "feed": feed, "limit": 10000}
         if tok:
             p["page_token"] = tok
         r = client.get(f"{DATA}/v2/stocks/{sym}/bars", params=p)
@@ -211,6 +213,8 @@ def main():
     ap.add_argument("--set", action="append", default=[], help="override, e.g. orb.range_min=15")
     ap.add_argument("--direction", default="both", choices=["both", "gap", "range"])
     ap.add_argument("--label", default="")
+    ap.add_argument("--feed", default="iex", choices=["iex", "sip"],
+                    help="iex = what the bot sees live on the free plan, sip = whole market")
     a = ap.parse_args()
     cfg = load_config()
     for s in a.set:
@@ -223,7 +227,7 @@ def main():
     data = {}
     with httpx.Client(headers=hdr, timeout=60) as c:
         for sym in cfg["orb"]["static_pool"]:
-            data[sym] = sessions(fetch(c, sym, start.strftime("%Y-%m-%dT00:00:00Z"), end.strftime("%Y-%m-%dT00:00:00Z")))
+            data[sym] = sessions(fetch(c, sym, start.strftime("%Y-%m-%dT00:00:00Z"), end.strftime("%Y-%m-%dT00:00:00Z"), a.feed))
     cands = prepare(data, cfg["orb"])
     first = (end - timedelta(days=a.days)).strftime("%Y-%m-%d")
     cands = {d: v for d, v in cands.items() if d >= first}

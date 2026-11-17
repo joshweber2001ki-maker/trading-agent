@@ -5,12 +5,14 @@ whether the article is traded at all and how wide the trade is set up: stop, tar
 limit come from a profile per class, scaled by how far the stock usually swings.
 """
 import asyncio
+import json
 from datetime import timedelta
 
-from .common import iso, now, parse_ts, spawn
+from .common import iso, now, parse_ts
 from .llm import is_noise
 
 HORIZONS = (5, 15, 30, 60)
+OUTCOME_DELAY_MIN = 20   # after the close; whole-market prices are free once they are 15 minutes old
 
 
 def vol_factor(stats, cfg):
@@ -170,7 +172,7 @@ class NewsStrategy:
         st = stats.get(sym)
         factor = vol_factor(st, self.cfg)
         base.update(symbol=sym, verdict=verdict, age_s=round(age), size=(st or {}).get("size"),
-                    daily_range_pct=(st or {}).get("daily_range_pct"),
+                    daily_range_pct=(st or {}).get("daily_range_pct"), received=iso(received),
                     llm_s=round((now() - received).total_seconds(), 1))
         self.journal.event("news_classified", **base)
 
@@ -180,9 +182,9 @@ class NewsStrategy:
                 self.orb.add_candidate(sym, source="news", verdict=verdict, headline=head[:140])
             return
 
-        # From here on: during the session. Every rated article is followed for an hour,
-        # traded or not, so that the ratings can be checked against what the price did.
-        spawn(self._track(sym, verdict, base, received))
+        # From here on: during the session. What the price did after each of these articles,
+        # traded or not, is measured after the close (log_outcomes), so that the ratings can
+        # be checked against it.
         if verdict["direction"] == "none" or verdict["impact"] < self.cfg["min_impact"] \
                 or verdict["surprise"] < self.cfg["min_surprise"] \
                 or verdict["confidence"] < self.cfg["min_confidence"]:
@@ -250,19 +252,56 @@ class NewsStrategy:
                 break
         self.journal.event("rejected", stage="confirm", reason=last_detail, ref_price=ref, **base)
 
-    async def _track(self, sym, verdict, base, t0):
-        """An hour later (or at the close): log what the price did after this article."""
+    async def log_outcomes(self):
+        """After the close: log what the price did after every article rated during the session.
+
+        One batch per day, built from the day's own event log, so a restart loses nothing. Prices
+        come from the whole market ("sip"): the free data plan allows that once they are 15 minutes
+        old, and the IEX prices the bot sees live have gaps of minutes to hours in smaller stocks,
+        which would make their news look as if nothing had happened. Returns the number logged.
+        """
+        s = self.session
         try:
-            horizon = min(t0 + timedelta(minutes=HORIZONS[-1]), self.session.close)
-            await asyncio.sleep(max(0, (horizon - now()).total_seconds()) + 75)
-            bars = await self.api.bars(sym, "1Min", iso(t0 - timedelta(minutes=30)), iso(horizon + timedelta(minutes=1)))
-            out = outcome(bars, t0, horizon)
-            if out:
+            path = self.journal.dir / f"events-{s.day}.jsonl"
+            rows = []
+            for line in path.read_text(encoding="utf-8").splitlines() if path.exists() else []:
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    continue
+            done = {(r.get("article"), r.get("symbol")) for r in rows if r.get("kind") == "news_outcome"}
+            todo = [r for r in rows if r.get("kind") == "news_classified" and r.get("phase") == "live"
+                    and r.get("symbol") and (r.get("article"), r["symbol"]) not in done]
+            if not todo:
+                return 0
+            syms = sorted({r["symbol"] for r in todo})
+            start, end = iso(s.open - timedelta(minutes=30)), iso(s.close - timedelta(seconds=1))
+            bars, feed = {}, "sip"
+            try:
+                for i in range(0, len(syms), 100):
+                    bars.update(await self.api.bars_multi(syms[i:i + 100], "1Min", start, end, feed="sip"))
+            except Exception as e:   # refused or unavailable: the bot's own feed is better than nothing
+                self.journal.event("error", where="news_outcomes_sip", error=repr(e)[:200])
+                bars, feed = {}, getattr(self.api, "feed", "iex")
+                for i in range(0, len(syms), 100):
+                    bars.update(await self.api.bars_multi(syms[i:i + 100], "1Min", start, end))
+            logged = 0
+            for r in todo:
+                v = r.get("verdict") or {}
+                # Older log lines carry no receive time: the line was written right after the KI answered.
+                t0 = parse_ts(r["received"]) if r.get("received") else \
+                    parse_ts(r["t"]) - timedelta(seconds=r.get("llm_s") or 0)
+                out = outcome(bars.get(r["symbol"]) or [], t0, min(t0 + timedelta(minutes=HORIZONS[-1]), s.close))
+                if not out:
+                    continue
+                logged += 1
                 self.journal.event(
-                    "news_outcome", article=base["article"], symbol=sym, source=base["source"],
-                    direction=verdict["direction"], surprise=verdict["surprise"], impact=verdict["impact"],
-                    confidence=verdict["confidence"], category=verdict["category"],
-                    size=base.get("size"), daily_range_pct=base.get("daily_range_pct"), **out,
+                    "news_outcome", article=r.get("article"), symbol=r["symbol"], source=r.get("source"),
+                    received=iso(t0), feed=feed, direction=v.get("direction"), surprise=v.get("surprise"),
+                    impact=v.get("impact"), confidence=v.get("confidence"), category=v.get("category"),
+                    size=r.get("size"), daily_range_pct=r.get("daily_range_pct"), **out,
                 )
+            return logged
         except Exception as e:
-            self.journal.event("error", where="news_track", symbol=sym, error=repr(e)[:200])
+            self.journal.event("error", where="news_outcomes", error=repr(e)[:300])
+            return 0

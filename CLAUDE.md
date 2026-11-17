@@ -27,7 +27,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `deploy/` | Installation, Dienste, stündlicher Abgleich mit GitHub |
 | `memory/strategy.md` | die Strategie in Worten, mit Begründung der Startwerte |
 | `logs/` | Protokolle des Servers (werden stündlich vom Server hochgeladen) |
-| `reports/` | Wochenrückblicke |
+| `reports/` | Wochenrückblicke und Bewertungen (offene Vorschläge stehen dort) |
 | `archive/aria-v1/` | altes Setup „ARIA" (April–Mai 2026), nur zum Nachlesen |
 
 ## Regeln für die Arbeit an diesem Repo

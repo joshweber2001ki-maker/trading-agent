@@ -119,7 +119,11 @@ async def main(day):
     async def follow(a, v):
         t0 = parse_ts(a["created_at"])
         async with sem2:
-            bars = await api.bars(v["symbol"], "1Min", iso(t0 - timedelta(minutes=30)), iso(t0 + timedelta(minutes=61)))
+            start, end = iso(t0 - timedelta(minutes=30)), iso(t0 + timedelta(minutes=61))
+            try:    # whole-market prices; free for past days, refused for the last 15 minutes
+                bars = (await api.bars_multi([v["symbol"]], "1Min", start, end, feed="sip")).get(v["symbol"]) or []
+            except Exception:
+                bars = await api.bars(v["symbol"], "1Min", start, end)
         o = outcome(bars, t0, min(t0 + timedelta(minutes=60), close_dt))
         if o and o["ret_30"] is not None:
             by_impact.setdefault(v["impact"], []).append((v, o))

@@ -5,6 +5,7 @@ import logging
 import signal
 import subprocess
 import time
+from datetime import timedelta
 
 import websockets
 
@@ -13,7 +14,7 @@ from .common import DATA, ROOT, Journal, env, load_config, log, now, spawn
 from .executor import Executor
 from .llm import Classifier
 from .market import Session, StockStats, Universe
-from .news_strategy import NewsStrategy
+from .news_strategy import OUTCOME_DELAY_MIN, NewsStrategy
 from .orb_strategy import OrbStrategy
 from .wires import Wires
 
@@ -40,6 +41,7 @@ class Bot:
         )
         self.wires = Wires(self.cfg["wires"], self.universe, self.news.on_article, self.journal)
         self.day = None
+        self.outcomes_day = None
         self.flattened = False
         self.start_equity = None
         self.errors = 0
@@ -96,12 +98,20 @@ class Bot:
                         await self.orb.step()
                 elif self.session.trading_day and now() < self.session.open:
                     await self.orb.step()
+                elif (self.session.trading_day and self.outcomes_day != self.day
+                      and now() >= self.session.close + timedelta(minutes=OUTCOME_DELAY_MIN)):
+                    # Once per day (again after a restart; finished articles are skipped).
+                    self.outcomes_day = self.day
+                    spawn(self.news.log_outcomes())
             except Exception as e:
                 self.errors += 1
                 self.journal.event("error", where="control", error=repr(e)[:300])
             if time.monotonic() - self.last_status > 60:
                 self.last_status = time.monotonic()
-                self.write_status()
+                try:
+                    self.write_status()
+                except Exception as e:   # e.g. a full disk: must not end trade management
+                    log.warning("status not written: %r", e)
             await asyncio.sleep(poll)
 
     def write_status(self):

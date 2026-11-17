@@ -23,9 +23,12 @@ Alle Zahlen stehen in `config.toml`; hier steht, was sie bedeuten und warum sie 
 ## Nachrichtenquellen
 
 1. **Alpacas Nachrichtenstrom.** Liefert seit 2026 nur noch KI-Zusammenfassungen des Anbieters
-   fiscal.ai, gebündelt etwa zur Minute 01 und 31 jeder Stunde. Für schnelles Handeln zu spät.
-2. **Pressemitteilungen von PR Newswire** (`bot/wires.py`, zehn RSS-Feeds). Eine Meldung steht
-   dort nach etwa 2–4 Minuten. Der Feed nennt den Firmennamen, aber kein Börsenkürzel; der Name
+   fiscal.ai, gebündelt etwa zur Minute 02 und 32 jeder Stunde. Gemessen am 17.11.: dieselben
+   Ereignisse kommen dort 18 bis über 90 Minuten nach der Pressemitteilung an (Median 50
+   Minuten), tragen aber einen frischen Zeitstempel. Für schnelles Handeln zu spät.
+2. **Pressemitteilungen von PR Newswire** (`bot/wires.py`, zehn RSS-Feeds). Gemessen am 17.11.:
+   Eine Meldung erreicht den Bot im Median 116 Sekunden nach Veröffentlichung, 90 % unter
+   200 Sekunden. Der Feed nennt den Firmennamen, aber kein Börsenkürzel; der Name
    wird deshalb mit den Namen der handelbaren US-Aktien abgeglichen. Es zählen nur exakte
    Treffer, damit nie die falsche Aktie gehandelt wird. Abgedeckt ist nur dieser eine
    Verteiler, also ein Teil aller Unternehmensmeldungen.
@@ -73,7 +76,10 @@ Fortsetzung in den Minuten danach.
 **Mitschreiben ohne Handel.** Zu jeder in der Handelszeit bewerteten Meldung notiert der Bot,
 wie sich der Kurs nach 5, 15, 30 und 60 Minuten entwickelt hat (`news_outcome` im Protokoll),
 egal ob gehandelt wurde. Daran lässt sich prüfen, ob Richtung und Wirkungs-Stufe der KI
-stimmen, auch wenn kaum Trades zustande kommen.
+stimmen, auch wenn kaum Trades zustande kommen. Gemessen wird einmal am Tag, 20 Minuten nach
+Börsenschluss, mit Kursen des gesamten Marktes (die sind kostenlos, sobald sie 15 Minuten alt
+sind). Die IEX-Kurse, die der Bot live sieht, haben bei kleineren Aktien Lücken von Minuten
+bis Stunden; damit sähe es so aus, als hätte sich nach der Meldung nichts bewegt.
 
 ## Strategie 2: Ausbruch aus der Eröffnungsspanne
 
@@ -94,15 +100,20 @@ Handelsminuten oft in dieselbe Richtung weiter.
 ## Erste Befunde vor dem Start (2026-11-17)
 
 **Ausbruchs-Strategie, Rückrechnung über 90 Tage** (`tools/backtest_orb.py`, nur die feste
-Liste von 20 Aktien, IEX-Daten, 0,02 % Slippage je Seite): 207 Trades, Trefferquote 37 %,
-Ergebnis −4,9 %, Profitfaktor 0,92; ohne Slippage −1,5 %. Geprüfte Varianten (nur in
-Richtung der Kurslücke, 15-Minuten-Spanne, Ziel 3R, strengeres Volumen, Zeitlimit 30 Minuten)
-liegen alle zwischen −12 % und +1 %. Einzige klar positive Variante: Stop auf der anderen
-Seite der Spanne, nur in Richtung der Spanne, halten bis Börsenschluss (+9,2 %, Profitfaktor
-1,23, 154 Trades). Das widerspricht aber dem Wunsch nach sehr kurzer Haltedauer und ist eine
-von 15 Varianten, also kein belastbarer Beleg. **Fazit: Auf der festen Liste zeigt die
-kurze Variante keinen Vorteil.** Offen ist, ob die tagesaktuellen Kandidaten (Gewinner,
-Verlierer, News) besser laufen; das kann nur der Paper-Test zeigen.
+Liste von 20 Aktien, 0,02 % Slippage je Seite). Mit IEX-Daten: Zeitlimit 90 Minuten (erste
+Einstellung) 207 Trades, Trefferquote 37 %, Ergebnis −4,9 %, Profitfaktor 0,92; Zeitlimit
+30 Minuten (heutige Einstellung) −1,3 %, Profitfaktor 0,98, ohne Slippage +2,7 %.
+**Mit Kursen des gesamten Marktes (`--feed sip`, nachgerechnet am 17.11.) fällt die heutige
+Einstellung deutlich schlechter aus:** 172 Trades, Trefferquote 35 %, Ergebnis −9,3 %,
+Profitfaktor 0,80; ohne Slippage −4,3 %, mit 0,05 % je Seite −15,7 %. In den IEX-Kursen
+fehlen Ausschläge, die in Wirklichkeit Stops auslösen. Einzige positive Variante auf beiden
+Datenquellen: nur in Richtung der Eröffnungsspanne, Stop am anderen Ende der Spanne, kein
+Kursziel, halten bis Börsenschluss (Gesamtmarkt +9,7 %, Profitfaktor 1,31, 136 Trades; IEX
++9,2 %, 154 Trades). Das entspricht der veröffentlichten Untersuchung zu dieser Strategie,
+widerspricht aber dem Wunsch nach sehr kurzer Haltedauer und ist mit 136 Trades kein
+belastbarer Beleg. **Fazit: Auf der festen Liste verliert die kurze Variante schon vor
+Kosten.** Offen ist, ob die tagesaktuellen Kandidaten (Gewinner, Verlierer, News) besser
+laufen; das kann nur der Paper-Test zeigen.
 
 **Nachrichten-Strategie, Nachspiel des 16.11.2026** (`tools/replay_news.py`, nur Alpacas
 Strom): 401 Meldungen in der Handelszeit, 232 bewertet, 6 als handelbar eingestuft, bei
@@ -114,7 +125,14 @@ Deshalb die zweite Quelle.
 - **Papertrading füllt Orders zu günstig aus.** Echte Kursrutscher bei Nachrichten bildet
   die Simulation nicht ab. Gute Paper-Ergebnisse sind deshalb eine Obergrenze.
 - **Kursdaten kommen nur von der Börse IEX** (kostenlose Stufe), ein kleiner Ausschnitt des
-  Marktes. Volumen und Geld-/Brief-Kurse sind dadurch ungenau.
+  Marktes. Volumen und Geld-/Brief-Kurse sind dadurch ungenau. Gemessen am 16.11.: 3 bis 5 %
+  des Umsatzes; die Eröffnungsspanne ist bei 19 von 25 Aktien an mindestens einer Kante um
+  mehr als den Ausbruchs-Puffer zu eng; eine kleine Aktie hatte auf IEX 4 Handelsminuten am
+  ganzen Tag.
+- **Alle weiteren Schwächen und die offenen Vorschläge dazu** stehen in
+  `reports/2026-11-17-kritische-bewertung.md` (unter anderem: Kandidatenlisten der
+  Ausbruchs-Strategie stammen vom Vortag, Bezugskurs der News-Strategie, keine Grenze nach
+  Handelsumsatz, Abgleich läuft als root, keine Alarmierung).
 - **Die meisten wichtigen Unternehmensmeldungen erscheinen außerhalb der Handelszeit**
   (Quartalszahlen vor Börsenstart oder nach Börsenschluss). Während der Handelszeit gibt es
   deshalb nur wenige News-Signale; die übrigen Meldungen fließen in die Kandidaten für die
@@ -129,3 +147,7 @@ Deshalb die zweite Quelle.
 - 2026-11-17 (von Josh freigegeben, aktiv ab 18.11.): Wirkungs-Stufe der KI mit
   Firmengröße und Schwankung als Kontext; Filter „Wirkung ≥ 1"; Stop, Ziel und Zeitlimit
   je Stufe statt fester Werte; Mitschreiben der Kursverläufe; Feierabend-Wächter.
+- 2026-11-17 (ohne Einfluss auf den Handel): Kursverläufe nach Meldungen werden nach
+  Börsenschluss mit Kursen des gesamten Marktes gemessen statt laufend mit IEX-Kursen;
+  Rückrechnung kann mit Kursen des gesamten Marktes rechnen. Kritische Bewertung mit zehn
+  offenen Vorschlägen in `reports/2026-11-17-kritische-bewertung.md`.

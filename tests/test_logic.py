@@ -469,3 +469,62 @@ def test_weekly_stats(tmp_path):
     assert "Wochenstatistik 2026-11-16 bis 2026-11-20" in markdown(r)
     assert default_week(datetime(2026, 11, 21).date()) == (start, end)          # Saturday -> same week
     assert default_week(datetime(2026, 11, 18).date())[0].isoformat() == "2026-11-09"
+
+
+def test_outcomes_are_measured_after_the_close_from_the_event_log(tmp_path):
+    from bot.news_strategy import NewsStrategy
+    t = datetime.now(timezone.utc)
+
+    class Sess:
+        day = t.astimezone(ET).strftime("%Y-%m-%d")
+        open, close = t - timedelta(hours=4), t - timedelta(minutes=30)
+
+    t0 = (Sess.open + timedelta(minutes=30)).replace(second=30, microsecond=0)   # article received
+    first = t0.replace(second=0) - timedelta(minutes=5)
+
+    def bar(minute, c):
+        return {"t": iso(first + timedelta(minutes=minute)), "c": c, "h": c, "l": c}
+    bars = [bar(i, 100.0) for i in range(5)] + [bar(5, 101.0), bar(20, 102.0), bar(45, 103.0)]
+
+    class Api:
+        feed = "iex"
+        def __init__(self): self.feeds, self.fail_sip = [], False
+        async def bars_multi(self, symbols, timeframe, start, end, feed=None):
+            self.feeds.append(feed)
+            if feed == "sip" and self.fail_sip:
+                raise RuntimeError("subscription does not permit querying recent SIP data")
+            return {s: bars for s in symbols if s == "ACME"}
+
+    def run(root, fail_sip=False):
+        j, api = Journal(root), Api()
+        api.fail_sip = fail_sip
+        v = {"direction": "up", "surprise": 8, "impact": 2, "confidence": 7, "category": "contract"}
+        j.event("news_classified", article="a1", symbol="ACME", source="prnewswire", phase="live",
+                received=iso(t0), verdict=v, size="small", daily_range_pct=3.1)
+        j.event("news_classified", article="a2", symbol="ACME", source="fiscal.ai", phase="premarket",
+                received=iso(t0), verdict=v)                      # not rated during the session
+        j.event("news_classified", article="a3", symbol="QUIET", source="fiscal.ai", phase="live",
+                received=iso(t0), verdict=v)                      # no prices at all: nothing to measure
+        log = root / "logs" / f"events-{Sess.day}.jsonl"
+        with open(log, "a") as f:                                 # a line as the previous version wrote it
+            f.write(json.dumps({"t": iso(t0 + timedelta(seconds=2)), "kind": "news_classified", "article": "old",
+                                "symbol": "ACME", "source": "fiscal.ai", "phase": "live", "llm_s": 2.0,
+                                "verdict": {"direction": "down", "surprise": 7, "confidence": 6}}) + "\n")
+            f.write('{"t": "half-written line\n')
+        news = NewsStrategy(api, CFG, j, Sess, None, None, None)
+        first_run, second_run = asyncio.run(news.log_outcomes()), asyncio.run(news.log_outcomes())
+        rows = [json.loads(l) for l in log.read_text().splitlines() if l.startswith('{"t": "2')]
+        return api, first_run, second_run, [r for r in rows if r["kind"] == "news_outcome"], rows
+
+    api, n1, n2, out, _ = run(tmp_path / "a")
+    assert (n1, n2) == (2, 0) and len(out) == 2                    # a restart measures nothing twice
+    o = next(r for r in out if r["article"] == "a1")
+    assert o["feed"] == "sip" and set(api.feeds) == {"sip"} and o["received"] == iso(t0)
+    assert (o["ref_price"], o["ret_5"], o["ret_15"], o["ret_30"], o["ret_60"]) == (100.0, 1.0, 2.0, 2.0, 3.0)
+    assert o["impact"] == 2 and o["size"] == "small" and o["source"] == "prnewswire"
+    old = next(r for r in out if r["article"] == "old")
+    assert old["ret_60"] == 3.0 and old["impact"] is None and old["direction"] == "down"
+
+    api, n1, _, out, rows = run(tmp_path / "b", fail_sip=True)       # whole-market data refused
+    assert n1 == 2 and {r["feed"] for r in out} == {"iex"} and api.feeds[:2] == ["sip", None]
+    assert any(r["kind"] == "error" and r["where"] == "news_outcomes_sip" for r in rows)
