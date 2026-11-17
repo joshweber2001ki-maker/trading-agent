@@ -1,4 +1,5 @@
 """Shared helpers: config, time, journal."""
+import asyncio
 import json
 import logging
 import os
@@ -16,6 +17,17 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = Path(os.environ.get("BOT_DATA_DIR") or ROOT)
 ET = ZoneInfo("America/New_York")
 log = logging.getLogger("bot")
+
+
+_tasks = set()
+
+
+def spawn(coro):
+    """Start a background task and keep a reference to it (the event loop itself only keeps a weak one)."""
+    t = asyncio.ensure_future(coro)
+    _tasks.add(t)
+    t.add_done_callback(_tasks.discard)
+    return t
 
 
 def now() -> datetime:

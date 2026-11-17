@@ -9,7 +9,7 @@ import time
 import websockets
 
 from .alpaca import Alpaca
-from .common import DATA, ROOT, Journal, env, load_config, log, now
+from .common import DATA, ROOT, Journal, env, load_config, log, now, spawn
 from .executor import Executor
 from .llm import Classifier
 from .market import Session, Universe
@@ -64,7 +64,7 @@ class Bot:
                     async for raw in ws:
                         for m in json.loads(raw):
                             if m.get("T") == "n":
-                                asyncio.create_task(self.news.on_article(m))
+                                spawn(self.news.on_article(m))
                             elif m.get("T") == "subscription":
                                 log.info("news stream connected")
                                 backoff, self.ws_connected = 2, True

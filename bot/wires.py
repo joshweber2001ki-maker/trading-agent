@@ -12,7 +12,7 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 
-from .common import iso, log
+from .common import iso, log, spawn
 from .market import FUND_RE
 
 NS = {"dc": "http://purl.org/dc/elements/1.1/"}
@@ -141,7 +141,7 @@ class Wires:
             art = to_article(item, self.index, self.universe.cache, "prnewswire", self.cfg["max_age_s"])
             if art:
                 self.stats["matched"] += 1
-                asyncio.create_task(self.on_article(art))
+                spawn(self.on_article(art))
 
     async def run(self):
         """Poll all feeds round-robin, one request every poll_s / len(feeds) seconds."""
