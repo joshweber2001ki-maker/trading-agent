@@ -138,14 +138,17 @@ class Alpaca:
         d = await self._req("GET", f"{DATA}/v2/stocks/{symbol}/bars", params=params)
         return (d or {}).get("bars") or []
 
-    async def bars_multi(self, symbols, timeframe, start, end):
-        """Bars for many symbols in one request (paged). Returns {symbol: [bars]}."""
+    async def bars_multi(self, symbols, timeframe, start, end, feed=None):
+        """Bars for many symbols in one request (paged). Returns {symbol: [bars]}.
+
+        feed="sip" (the whole market) also works on the free plan as long as `end` is in the past.
+        """
         out, tok = {}, None
         if not symbols:
             return out
         while True:
             params = {"symbols": ",".join(symbols), "timeframe": timeframe, "start": start, "end": end,
-                      "feed": self.feed, "limit": 10000}
+                      "feed": feed or self.feed, "limit": 10000}
             if tok:
                 params["page_token"] = tok
             d = await self._req("GET", f"{DATA}/v2/stocks/bars", params=params) or {}

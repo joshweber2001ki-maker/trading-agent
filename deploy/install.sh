@@ -2,7 +2,7 @@
 # Installs or updates the trading bot on a Linux server. Run as root. Safe to run again.
 #
 # It only adds things: a user "trader", /opt/trading-agent, /var/lib/trading-bot,
-# /etc/trading-bot and three systemd units. Nothing else on the server is changed.
+# /etc/trading-bot and five systemd units. Nothing else on the server is changed.
 set -euo pipefail
 
 REPO_HTTPS=https://github.com/joshweber2001ki-maker/trading-agent.git
@@ -56,10 +56,11 @@ fi
 
 echo "== 6/6 Dienste"
 install -m 644 "$APP"/deploy/trading-bot.service "$APP"/deploy/trading-bot-sync.service \
-  "$APP"/deploy/trading-bot-sync.timer /etc/systemd/system/
+  "$APP"/deploy/trading-bot-sync.timer "$APP"/deploy/trading-bot-guard.service \
+  "$APP"/deploy/trading-bot-guard.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable -q trading-bot.service trading-bot-sync.timer
-systemctl start trading-bot-sync.timer
+systemctl enable -q trading-bot.service trading-bot-sync.timer trading-bot-guard.timer
+systemctl start trading-bot-sync.timer trading-bot-guard.timer
 
 echo
 echo "Fertig installiert."

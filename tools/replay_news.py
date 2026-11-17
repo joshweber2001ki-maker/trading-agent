@@ -21,8 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bot.alpaca import DATA, Alpaca  # noqa: E402
 from bot.common import ET, iso, load_config, parse_ts  # noqa: E402
 from bot.llm import Classifier, is_noise  # noqa: E402
-from bot.market import Universe  # noqa: E402
-from bot.news_strategy import confirmation, stop_distance_pct  # noqa: E402
+from bot.market import StockStats, Universe  # noqa: E402
+from bot.news_strategy import confirmation, outcome, trade_plan, vol_factor  # noqa: E402
 
 
 async def articles(api, start, end):
@@ -38,8 +38,10 @@ async def articles(api, start, end):
             return out
 
 
-def simulate(bars, t0, dirn, cfg):
+def simulate(bars, t0, dirn, cfg, impact=1, factor=1.0):
     """Returns (stage, detail) where stage is 'no_price', 'unconfirmed' or 'trade'."""
+    base_cfg = cfg
+    cfg = {**cfg, "min_move_pct": cfg["min_move_pct"] * factor, "max_chase_pct": cfg["max_chase_pct"] * factor}
     before = [b for b in bars if parse_ts(b["t"]) + timedelta(minutes=1) <= t0]
     after = [b for b in bars if parse_ts(b["t"]) + timedelta(minutes=1) > t0]
     if len(before) < 3 or not after:
@@ -58,16 +60,16 @@ def simulate(bars, t0, dirn, cfg):
             continue
         entry = b["c"]
         seen = before + after[: i + 1]
-        dist = stop_distance_pct(seen, entry, cfg["stop_range_mult"], cfg["stop_min_pct"], cfg["stop_max_pct"])
+        dist, target_r, max_hold = trade_plan(impact, factor, seen, entry, base_cfg)
         stop = entry * (1 - dirn * dist / 100)
-        target = entry + dirn * cfg["target_r"] * abs(entry - stop)
+        target = entry + dirn * target_r * abs(entry - stop)
         t_in = parse_ts(b["t"])
         for nb in after[i + 1:]:
             if (nb["l"] <= stop) if dirn > 0 else (nb["h"] >= stop):
                 return "trade", {"r": -1.0, "exit": "stop", "dist": dist}
             if (nb["h"] >= target) if dirn > 0 else (nb["l"] <= target):
-                return "trade", {"r": cfg["target_r"], "exit": "target", "dist": dist}
-            if parse_ts(nb["t"]) - t_in >= timedelta(minutes=cfg["max_hold_min"]):
+                return "trade", {"r": target_r, "exit": "target", "dist": dist}
+            if parse_ts(nb["t"]) - t_in >= timedelta(minutes=max_hold):
                 return "trade", {"r": (nb["c"] - entry) * dirn / abs(entry - stop), "exit": "time", "dist": dist}
         return "trade", {"r": (after[-1]["c"] - entry) * dirn / abs(entry - stop), "exit": "end_of_data", "dist": dist}
     return "unconfirmed", last
@@ -95,34 +97,58 @@ async def main(day):
             todo.append((a, tr))
     sem = asyncio.Semaphore(6)
 
+    stock_stats = StockStats(api)
+
     async def classify(a, tr):
         async with sem:
-            v, err = await llm.classify(a, tr, {s: await uni.name(s) for s in tr})
+            st = await stock_stats.get(tr)
+            v, err = await llm.classify(a, tr, {s: await uni.name(s) for s in tr}, st)
             return a, v, err
 
     results = await asyncio.gather(*(classify(a, tr) for a, tr in todo))
     verdicts = [(a, v) for a, v, err in results if v]
     errors = Counter((err or "").split(":")[0] for _, v, err in results if not v)
-    tradeable = [(a, v) for a, v in verdicts if v["direction"] != "none"
+    tradeable = [(a, v) for a, v in verdicts if v["direction"] != "none" and v["impact"] >= n["min_impact"]
                  and v["surprise"] >= n["min_surprise"] and v["confidence"] >= n["min_confidence"]]
+    names = {0: "kaum", 1: "mittel", 2: "groß", 3: "sehr groß"}
+    print("Wirkung:", {names[k]: c for k, c in sorted(Counter(v["impact"] for _, v in verdicts).items())})
+    # What did the price do in the hour after each rated article? (uses the bot's own outcome logic)
+    by_impact = {}
+    sem2 = asyncio.Semaphore(5)
+
+    async def follow(a, v):
+        t0 = parse_ts(a["created_at"])
+        async with sem2:
+            bars = await api.bars(v["symbol"], "1Min", iso(t0 - timedelta(minutes=30)), iso(t0 + timedelta(minutes=61)))
+        o = outcome(bars, t0, min(t0 + timedelta(minutes=60), close_dt))
+        if o and o["ret_30"] is not None:
+            by_impact.setdefault(v["impact"], []).append((v, o))
+
+    await asyncio.gather(*(follow(a, v) for a, v in verdicts))
+    print("Kursbewegung in den 30 Minuten nach der Meldung, nach Wirkungs-Stufe (Betrag, Median):")
+    for k in sorted(by_impact):
+        moves = sorted(abs(o["ret_30"]) for _, o in by_impact[k])
+        swings = sorted(max(o["max_up"], -o["max_down"]) for _, o in by_impact[k])
+        print(f"  {names[k]:10} n={len(moves):3}  nach 30 min {moves[len(moves)//2]:.2f} %   größter Ausschlag in 60 min {swings[len(swings)//2]:.2f} %")
     print(f"{day}: {len(arts)} Meldungen in der Handelszeit, {len(todo)} an die KI, {len(verdicts)} bewertet, Fehler {dict(errors)}")
     print("Überraschung (0-10):", dict(sorted(Counter(v["surprise"] for _, v in verdicts).items())))
     print("Richtung:", dict(Counter(v["direction"] for _, v in verdicts)),
           "| Minute der Stunde:", dict(Counter(a["created_at"][14:16] for a, _ in verdicts).most_common(4)))
-    print(f"Als handelbar eingestuft (Überraschung >= {n['min_surprise']}, Sicherheit >= {n['min_confidence']}): {len(tradeable)}")
+    print(f"Als handelbar eingestuft (Überraschung >= {n['min_surprise']}, Wirkung >= {n['min_impact']}, Sicherheit >= {n['min_confidence']}): {len(tradeable)}")
     outcomes = Counter()
     rs = []
     for a, v in tradeable:
         t0 = parse_ts(a["created_at"])
         dirn = 1 if v["direction"] == "up" else -1
         bars = await api.bars(v["symbol"], "1Min", iso(t0 - timedelta(minutes=40)), iso(t0 + timedelta(minutes=45)))
-        stage, detail = simulate(bars, t0, dirn, n)
+        st = (await stock_stats.get([v["symbol"]])).get(v["symbol"])
+        stage, detail = simulate(bars, t0, dirn, n, v["impact"], vol_factor(st, n))
         outcomes[stage if stage != "unconfirmed" else f"unconfirmed:{detail}"] += 1
         tail = ""
         if stage == "trade":
             rs.append(detail["r"])
             tail = f" -> {detail['r']:+.2f} R ({detail['exit']}, Stop {detail['dist']:.2f} %)"
-        print(f"  {a['created_at'][11:16]} {v['symbol']:5} {v['direction']:4} Ü{v['surprise']} S{v['confidence']} "
+        print(f"  {a['created_at'][11:16]} {v['symbol']:5} {v['direction']:4} Ü{v['surprise']} W{v['impact']} S{v['confidence']} "
               f"{v['category']:10} {stage if stage == 'trade' else stage + ':' + str(detail)}{tail} | {a['headline'][:70]}")
     print("Ergebnis:", dict(outcomes), "| Trades:", len(rs), "| Summe:", f"{sum(rs):+.2f} R" if rs else "-")
 

@@ -1,18 +1,38 @@
-"""News strategy: classify a fresh article, wait for the price to confirm, trade the continuation."""
+"""News strategy: classify a fresh article, wait for the price to confirm, trade the continuation.
+
+The KI rates each article (direction, surprise, impact, confidence). The impact class decides
+whether the article is traded at all and how wide the trade is set up: stop, target and time
+limit come from a profile per class, scaled by how far the stock usually swings.
+"""
 import asyncio
 from datetime import timedelta
 
-from .common import iso, now, parse_ts
+from .common import iso, now, parse_ts, spawn
 from .llm import is_noise
 
+HORIZONS = (5, 15, 30, 60)
 
-def stop_distance_pct(bars, price, mult, lo, hi):
-    """Stop distance in percent: a fraction of the last 10 minutes' price range, clamped."""
-    recent = bars[-10:]
-    if not recent or price <= 0:
-        return lo
-    rng = max(b["h"] for b in recent) - min(b["l"] for b in recent)
-    return max(lo, min(hi, mult * rng / price * 100))
+
+def vol_factor(stats, cfg):
+    """How much wilder (>1) or calmer (<1) than an average stock this one usually is."""
+    if not stats or not stats.get("daily_range_pct"):
+        return 1.0
+    f = stats["daily_range_pct"] / cfg["reference_daily_range_pct"]
+    return max(cfg["vol_factor_min"], min(cfg["vol_factor_max"], f))
+
+
+def trade_plan(impact, factor, bars, price, cfg):
+    """Stop distance (percent), target (multiple of the stop distance) and time limit for one trade."""
+    prof = cfg["impact"][str(max(1, min(3, impact)))]
+    base = prof["stop_pct"] * factor
+    recent = bars[-5:]
+    noise = 0.0
+    if recent and price > 0:
+        noise = (max(b["h"] for b in recent) - min(b["l"] for b in recent)) / price * 100 * cfg["noise_mult"]
+    # The stop must sit outside the current noise, but noise may at most double it.
+    stop = min(max(base, noise), base * 2)
+    stop = max(cfg["stop_floor_pct"], min(cfg["stop_cap_pct"], stop))
+    return stop, prof["target_r"], prof["max_hold_min"]
 
 
 def confirmation(ref, price, dirn, minute_vol, avg_vol, spread_pct, cfg):
@@ -31,10 +51,37 @@ def confirmation(ref, price, dirn, minute_vol, avg_vol, spread_pct, cfg):
     return "confirmed", f"move {move:.2f}%"
 
 
+def outcome(bars, t0, until):
+    """What the price did after t0: percent change after 5/15/30/60 minutes and the extremes.
+
+    `until` is the time up to which the bars are complete; later horizons are None.
+    A stock that did not trade in between simply has not moved. Returns None without a
+    price from before t0.
+    """
+    before = [b for b in bars if parse_ts(b["t"]) + timedelta(minutes=1) <= t0]
+    if not before:
+        return None
+    ref = before[-1]["c"]
+    after = [b for b in bars if parse_ts(b["t"]) + timedelta(minutes=1) > t0]
+    out = {"ref_price": ref, "bars": len(after)}
+    for h in HORIZONS:
+        end = t0 + timedelta(minutes=h)
+        if end > until:
+            out[f"ret_{h}"] = None
+            continue
+        upto = [b for b in after if parse_ts(b["t"]) < end]
+        out[f"ret_{h}"] = round(((upto[-1]["c"] if upto else ref) - ref) / ref * 100, 3)
+    window = [b for b in after if parse_ts(b["t"]) < t0 + timedelta(minutes=HORIZONS[-1])]
+    out["max_up"] = round((max([b["h"] for b in window] + [ref]) - ref) / ref * 100, 3)
+    out["max_down"] = round((min([b["l"] for b in window] + [ref]) - ref) / ref * 100, 3)
+    return out
+
+
 class NewsStrategy:
-    def __init__(self, api, cfg, journal, session, universe, executor, classifier, orb=None):
+    def __init__(self, api, cfg, journal, session, universe, executor, classifier, orb=None, stats=None):
         self.api, self.journal, self.session = api, journal, session
         self.universe, self.executor, self.llm, self.orb = universe, executor, classifier, orb
+        self.stock_stats = stats
         self.cfg = cfg["news"]
         self.orb_min_surprise = cfg["orb"]["premarket_news_min_surprise"]
         self.premarket_from = cfg["orb"]["premarket_news_from"]
@@ -112,25 +159,33 @@ class NewsStrategy:
             return  # the same release again (second feed, second language version, correction)
         self.seen.add(title_key)
         names = {s: await self.universe.name(s) for s in tradable}
+        stats = await self.stock_stats.get(tradable) if self.stock_stats else {}
         snap_task = asyncio.create_task(self.api.snapshots(tradable))
-        verdict, err = await self.llm.classify(art, tradable, names)
+        verdict, err = await self.llm.classify(art, tradable, names, stats)
         snaps = await snap_task
         if err:
             return skip(err)
         self.stats["classified"] += 1
         sym = verdict["symbol"]
-        base.update(symbol=sym, verdict=verdict, age_s=round(age),
+        st = stats.get(sym)
+        factor = vol_factor(st, self.cfg)
+        base.update(symbol=sym, verdict=verdict, age_s=round(age), size=(st or {}).get("size"),
+                    daily_range_pct=(st or {}).get("daily_range_pct"),
                     llm_s=round((now() - received).total_seconds(), 1))
         self.journal.event("news_classified", **base)
-        if verdict["direction"] == "none":
-            return
 
         if phase == "premarket":
-            if self.orb and verdict["surprise"] >= self.orb_min_surprise:
+            if self.orb and verdict["direction"] != "none" and verdict["impact"] >= self.cfg["min_impact"] \
+                    and verdict["surprise"] >= self.orb_min_surprise:
                 self.orb.add_candidate(sym, source="news", verdict=verdict, headline=head[:140])
             return
 
-        if verdict["surprise"] < self.cfg["min_surprise"] or verdict["confidence"] < self.cfg["min_confidence"]:
+        # From here on: during the session. Every rated article is followed for an hour,
+        # traded or not, so that the ratings can be checked against what the price did.
+        spawn(self._track(sym, verdict, base, received))
+        if verdict["direction"] == "none" or verdict["impact"] < self.cfg["min_impact"] \
+                or verdict["surprise"] < self.cfg["min_surprise"] \
+                or verdict["confidence"] < self.cfg["min_confidence"]:
             return
         self.stats["candidates"] += 1
         last = self.recent.get(sym)
@@ -145,10 +200,12 @@ class NewsStrategy:
         if not snap.get("latestTrade"):
             return self.journal.event("rejected", stage="pre_confirm", reason="no_price", **base)
         ref = float(snap["latestTrade"]["p"])
-        return sym, verdict, ref, received, base
+        return sym, verdict, ref, received, base, factor
 
-    async def _confirm_and_enter(self, sym, verdict, ref, received, base):
-        cfg = self.cfg
+    async def _confirm_and_enter(self, sym, verdict, ref, received, base, factor):
+        # A calm stock confirms with a smaller move than a wild one.
+        cfg = {**self.cfg, "min_move_pct": self.cfg["min_move_pct"] * factor,
+               "max_chase_pct": self.cfg["max_chase_pct"] * factor}
         dirn = 1 if verdict["direction"] == "up" else -1
         start = iso(now() - timedelta(minutes=35))
         bars = await self.api.bars(sym, "1Min", start)
@@ -165,24 +222,26 @@ class NewsStrategy:
             q = snap.get("latestQuote") or {}
             bp, ap = float(q.get("bp") or 0), float(q.get("ap") or 0)
             spread = (ap - bp) / ((ap + bp) / 2) * 100 if bp > 0 and ap > bp else None
-            mvol = float((snap.get("minuteBar") or {}).get("v") or 0)
+            mb = snap.get("minuteBar") or {}
+            mvol = float(mb.get("v") or 0)
             state, detail = confirmation(ref, price, dirn, mvol, avg_vol, spread, cfg)
             last_detail = detail
             if state == "abort":
                 break
             if state == "confirmed":
-                dist_pct = stop_distance_pct(
-                    bars, price, cfg["stop_range_mult"], cfg["stop_min_pct"], cfg["stop_max_pct"]
-                )
+                if mb and (not bars or mb.get("t") != bars[-1].get("t")):
+                    bars = bars + [mb]   # include the newest minute in the noise measurement
+                stop_pct, target_r, max_hold = trade_plan(verdict["impact"], factor, bars, price, self.cfg)
                 entered = await self.executor.enter({
                     "strategy": "news", "symbol": sym, "side": "long" if dirn > 0 else "short",
-                    "price": price, "stop": price * (1 - dirn * dist_pct / 100),
-                    "target_r": cfg["target_r"], "max_hold_min": cfg["max_hold_min"],
+                    "price": price, "stop": price * (1 - dirn * stop_pct / 100),
+                    "target_r": target_r, "max_hold_min": max_hold,
                     "meta": {
                         "article": base["article"], "headline": base["headline"], "source": base["source"],
-                        "verdict": verdict, "ref_price": ref,
+                        "verdict": verdict, "ref_price": ref, "vol_factor": round(factor, 2),
+                        "size": base.get("size"),
                         "news_to_signal_s": round((now() - received).total_seconds(), 1) + base["age_s"],
-                        "stop_dist_pct": round(dist_pct, 3), "confirm": detail,
+                        "stop_dist_pct": round(stop_pct, 3), "confirm": detail,
                     },
                 })
                 if entered:
@@ -190,3 +249,20 @@ class NewsStrategy:
                 last_detail = "entry_rejected"
                 break
         self.journal.event("rejected", stage="confirm", reason=last_detail, ref_price=ref, **base)
+
+    async def _track(self, sym, verdict, base, t0):
+        """An hour later (or at the close): log what the price did after this article."""
+        try:
+            horizon = min(t0 + timedelta(minutes=HORIZONS[-1]), self.session.close)
+            await asyncio.sleep(max(0, (horizon - now()).total_seconds()) + 75)
+            bars = await self.api.bars(sym, "1Min", iso(t0 - timedelta(minutes=30)), iso(horizon + timedelta(minutes=1)))
+            out = outcome(bars, t0, horizon)
+            if out:
+                self.journal.event(
+                    "news_outcome", article=base["article"], symbol=sym, source=base["source"],
+                    direction=verdict["direction"], surprise=verdict["surprise"], impact=verdict["impact"],
+                    confidence=verdict["confidence"], category=verdict["category"],
+                    size=base.get("size"), daily_range_pct=base.get("daily_range_pct"), **out,
+                )
+        except Exception as e:
+            self.journal.event("error", where="news_track", symbol=sym, error=repr(e)[:200])

@@ -19,23 +19,45 @@ poll_s                   = 5     # Prüfintervall für offene Trades
 
 [news]
 enabled                  = true
-max_article_age_s        = 90    # ältere Meldungen werden nicht mehr gehandelt
+max_article_age_s        = 90    # ältere Meldungen aus Alpacas Strom werden nicht mehr gehandelt
 max_symbols              = 3     # Meldungen mit mehr Aktien sind Sammelartikel
 min_surprise             = 7     # KI-Bewertung 0-10: wie überraschend
 min_confidence           = 6     # KI-Bewertung 0-10: wie sicher die Richtung
+min_impact               = 1     # KI-Bewertung 0-3: erwartete Kursbewegung; 0 = kaum, wird nicht gehandelt
 confirm_window_s         = 300   # so lange auf Bestätigung durch den Kurs warten
-min_move_pct             = 0.4   # Kurs muss mindestens so weit in die Richtung gelaufen sein
-max_chase_pct            = 3.0   # ist er schon weiter gelaufen, wird nicht hinterhergekauft
+min_move_pct             = 0.4   # Kurs muss mindestens so weit in die Richtung gelaufen sein (x Schwankungsfaktor)
+max_chase_pct            = 3.0   # ist er schon weiter gelaufen, wird nicht hinterhergekauft (x Schwankungsfaktor)
 volume_mult              = 2.0   # Minutenvolumen gegenüber dem Schnitt der letzten 30 Minuten
 max_spread_pct           = 0.3   # größere Geld-/Brief-Spanne = zu illiquide
-stop_range_mult          = 0.75  # Stop-Abstand = Faktor x Kursspanne der letzten 10 Minuten
-stop_min_pct             = 0.4
-stop_max_pct             = 1.5
-target_r                 = 2.0   # Kursziel als Vielfaches des Stop-Abstands
-max_hold_min             = 30    # Zeitlimit pro Trade
-symbol_cooldown_min      = 60    # nach einem Trade Pause für dieselbe Aktie
+symbol_cooldown_min      = 60    # nach einem Signal Pause für dieselbe Aktie
 start_after_open_min     = 5
 no_entry_before_close_min = 30
+
+# Schwankungsfaktor: übliche Tagesspanne der Aktie geteilt durch die einer Durchschnittsaktie.
+# Stop, Mindestbewegung und Höchstbewegung werden damit multipliziert.
+reference_daily_range_pct = 2.5
+vol_factor_min           = 0.6
+vol_factor_max           = 2.0
+noise_mult               = 0.5   # der Stop liegt mindestens so viel x Kursspanne der letzten 5 Minuten entfernt
+stop_floor_pct           = 0.3   # engster erlaubter Stop
+stop_cap_pct             = 4.0   # weitester erlaubter Stop
+
+# Handelsspanne je Wirkungs-Stufe der KI (für eine Durchschnittsaktie).
+# stop_pct = Stop-Abstand, target_r = Kursziel als Vielfaches des Stop-Abstands.
+[news.impact.1]   # mittel: etwa 1-3 % erwartet
+stop_pct = 0.5
+target_r = 2.0
+max_hold_min = 30
+
+[news.impact.2]   # groß: etwa 3-8 % erwartet
+stop_pct = 1.0
+target_r = 3.0
+max_hold_min = 60
+
+[news.impact.3]   # sehr groß: über 8 % erwartet
+stop_pct = 2.0
+target_r = 3.0
+max_hold_min = 90
 
 [orb]
 enabled                  = true

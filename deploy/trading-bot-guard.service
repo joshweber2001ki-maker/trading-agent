@@ -1,0 +1,16 @@
+[Unit]
+Description=Trading bot guard: make sure nothing stays open over the close
+ConditionPathExists=/etc/trading-bot/alpaca.env
+
+[Service]
+Type=oneshot
+User=trader
+WorkingDirectory=/opt/trading-agent
+EnvironmentFile=/etc/trading-bot/alpaca.env
+Environment=BOT_DATA_DIR=/var/lib/trading-bot
+ExecStart=/opt/trading-agent/.venv/bin/python tools/guard.py
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/trading-bot
+ProtectHome=true
+PrivateTmp=true

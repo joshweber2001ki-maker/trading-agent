@@ -18,7 +18,19 @@ if ! g pull -q --rebase; then
 fi
 g push -q origin HEAD:main || echo "push fehlgeschlagen (Deploy-Key bei GitHub hinterlegt?)"
 
-# 3. Restart on code changes, outside market hours (13:25-21:05 UTC covers both DST regimes).
+# 3. Keep the systemd units in step with the repo (does not restart the bot).
+units_changed=0
+for u in trading-bot.service trading-bot-sync.service trading-bot-sync.timer \
+         trading-bot-guard.service trading-bot-guard.timer; do
+  if ! cmp -s "$APP/deploy/$u" "/etc/systemd/system/$u"; then
+    install -m 644 "$APP/deploy/$u" /etc/systemd/system/
+    units_changed=1
+  fi
+done
+[ "$units_changed" = 1 ] && systemctl daemon-reload
+systemctl enable -q --now trading-bot-guard.timer
+
+# 4. Restart on code changes, outside market hours (13:25-21:05 UTC covers both DST regimes).
 running=$(cat "$DATA/state/running_commit" 2>/dev/null || echo none)
 head=$(g rev-parse HEAD)
 [ "$running" = "$head" ] && exit 0
@@ -33,8 +45,5 @@ if [ "$dow" -le 5 ] && [ "$hm" -ge 1325 ] && [ "$hm" -le 2105 ]; then
   exit 0
 fi
 runuser -u trader -- "$APP/.venv/bin/pip" install -q -r "$APP/requirements.txt"
-install -m 644 "$APP"/deploy/trading-bot.service "$APP"/deploy/trading-bot-sync.service \
-  "$APP"/deploy/trading-bot-sync.timer /etc/systemd/system/
-systemctl daemon-reload
 systemctl restart trading-bot
 echo "Code aktualisiert auf $head, Bot neu gestartet"

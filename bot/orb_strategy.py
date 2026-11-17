@@ -160,8 +160,11 @@ class OrbStrategy:
             ):
                 self.pool.pop(sym)
         # Keep the pool measurable in one go: all fixed and screener names, the most surprising news names.
-        news = sorted((s for s, i in self.pool.items() if i.get("source") == "news"),
-                      key=lambda s: -self.pool[s].get("verdict", {}).get("surprise", 0))
+        def strength(sym):
+            v = self.pool[sym].get("verdict", {})
+            return (v.get("impact", 0), v.get("surprise", 0))
+
+        news = sorted((s for s, i in self.pool.items() if i.get("source") == "news"), key=strength, reverse=True)
         for sym in news[self.cfg["max_news_candidates"]:]:
             self.pool.pop(sym)
         self.journal.event("orb_pool", size=len(self.pool), news=news[: self.cfg["max_news_candidates"]],

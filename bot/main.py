@@ -12,7 +12,7 @@ from .alpaca import Alpaca
 from .common import DATA, ROOT, Journal, env, load_config, log, now, spawn
 from .executor import Executor
 from .llm import Classifier
-from .market import Session, Universe
+from .market import Session, StockStats, Universe
 from .news_strategy import NewsStrategy
 from .orb_strategy import OrbStrategy
 from .wires import Wires
@@ -35,7 +35,8 @@ class Bot:
         self.llm = Classifier(env("ANTHROPIC_API_KEY", ""), self.cfg["llm"])
         self.orb = OrbStrategy(self.api, self.cfg, self.journal, self.session, self.universe, self.executor)
         self.news = NewsStrategy(
-            self.api, self.cfg, self.journal, self.session, self.universe, self.executor, self.llm, self.orb
+            self.api, self.cfg, self.journal, self.session, self.universe, self.executor, self.llm, self.orb,
+            stats=StockStats(self.api),
         )
         self.wires = Wires(self.cfg["wires"], self.universe, self.news.on_article, self.journal)
         self.day = None

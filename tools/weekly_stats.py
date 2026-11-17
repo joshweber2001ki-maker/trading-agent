@@ -60,6 +60,28 @@ def trade_stats(trades):
     }
 
 
+IMPACT = {0: "kaum", 1: "mittel", 2: "groß", 3: "sehr groß"}
+
+
+def outcome_stats(rows):
+    """How the price moved after rated articles. Moves are counted in the direction the KI predicted."""
+    def avg(xs):
+        xs = [x for x in xs if x is not None]
+        return round(sum(xs) / len(xs), 2) if xs else None
+
+    directed = [r for r in rows if r.get("direction") in ("up", "down")]
+    sign = lambda r: 1 if r["direction"] == "up" else -1
+    out = {"n": len(rows), "with_direction": len(directed)}
+    for h in (5, 15, 30, 60):
+        out[f"dir_move_{h}"] = avg([r[f"ret_{h}"] * sign(r) for r in directed if r.get(f"ret_{h}") is not None])
+    hits = [r["ret_30"] * sign(r) > 0 for r in directed if r.get("ret_30") is not None]
+    out["hit_rate_30_pct"] = round(sum(hits) / len(hits) * 100, 1) if hits else None
+    out["abs_move_30"] = avg([abs(r["ret_30"]) for r in rows if r.get("ret_30") is not None])
+    out["best_in_direction"] = avg([r["max_up"] if sign(r) > 0 else -r["max_down"] for r in directed])
+    out["worst_against"] = avg([r["max_down"] if sign(r) > 0 else -r["max_up"] for r in directed])
+    return out
+
+
 def build(root: Path, start: date, end: date):
     days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
     trades = [
@@ -84,6 +106,7 @@ def build(root: Path, start: date, end: date):
     skipped = Counter(e.get("reason", "?").split(":")[0] for e in events if e["kind"] == "news_skipped")
     errors = Counter(e.get("where", "?") for e in events if e["kind"] == "error")
     classified = [e for e in events if e["kind"] == "news_classified"]
+    outcomes = [e for e in events if e["kind"] == "news_outcome"]
     news_trades = by_strategy.get("news", [])
     by_category = defaultdict(list)
     for t in news_trades:
@@ -105,7 +128,9 @@ def build(root: Path, start: date, end: date):
             "tradeable_verdicts": sum(
                 1 for e in classified
                 if e["verdict"]["direction"] != "none" and e["verdict"]["surprise"] >= 7
+                and e["verdict"].get("confidence", 0) >= 6 and e["verdict"].get("impact", 1) >= 1
             ),
+            "by_impact": dict(sorted(Counter(IMPACT.get(e["verdict"].get("impact"), "?") for e in classified).items())),
             "avg_llm_s": round(sum(e.get("llm_s", 0) for e in classified) / len(classified), 1) if classified else None,
             "avg_news_to_signal_s": round(
                 sum(t["meta"].get("news_to_signal_s", 0) for t in news_trades) / len(news_trades), 1
@@ -123,6 +148,17 @@ def build(root: Path, start: date, end: date):
             src: trade_stats([t for t in news_trades if t.get("meta", {}).get("source") == src])
             for src in sorted({t.get("meta", {}).get("source") or "?" for t in news_trades})
         },
+        "ratings_vs_price": {
+            "all": outcome_stats(outcomes),
+            "by_impact": {IMPACT.get(k, str(k)): outcome_stats([o for o in outcomes if o.get("impact") == k])
+                          for k in sorted({o.get("impact") for o in outcomes if o.get("impact") is not None})},
+            "tradeable": outcome_stats([o for o in outcomes if o.get("direction") in ("up", "down")
+                                        and (o.get("impact") or 0) >= 1 and (o.get("surprise") or 0) >= 7
+                                        and (o.get("confidence") or 0) >= 6]),
+            "by_source": {src: outcome_stats([o for o in outcomes if o.get("source") == src])
+                          for src in sorted({o.get("source") or "?" for o in outcomes})},
+        },
+        "guard_interventions": sum(1 for e in events if e["kind"] == "guard"),
         "rejections": dict(rejections.most_common()),
         "errors": dict(errors),
         "halts": sum(1 for e in events if e["kind"] == "halt"),
@@ -153,12 +189,26 @@ def markdown(r):
         out.append(f"- {k}: {fmt(v)}")
     out += ["", "## News-Strategie",
             f'- bewertete Meldungen: {r["news"]["classified"]}, davon handelbar eingestuft: {r["news"]["tradeable_verdicts"]}',
+            f'- Verteilung der Wirkungs-Stufen: {r["news"]["by_impact"]}',
             f'- KI-Antwortzeit: {r["news"]["avg_llm_s"]} s, Meldung bis Signal: {r["news"]["avg_news_to_signal_s"]} s',
             f'- übersprungen: {r["news"]["skipped"]}']
     for k, v in r["news"]["by_category"].items():
         out.append(f"- Kategorie {k}: {fmt(v)}")
     for k, v in r["news_by_source"].items():
         out.append(f"- Quelle {k}: {fmt(v)}")
+    def fo(o):
+        if not o["n"]:
+            return "keine Daten"
+        return (f'{o["n"]} Meldungen ({o["with_direction"]} mit Richtung): Bewegung in vorhergesagter Richtung nach '
+                f'5/15/30/60 min = {o["dir_move_5"]} / {o["dir_move_15"]} / {o["dir_move_30"]} / {o["dir_move_60"]} %, '
+                f'Trefferquote nach 30 min {o["hit_rate_30_pct"]} %, Betrag der Bewegung nach 30 min {o["abs_move_30"]} %, '
+                f'bestenfalls {o["best_in_direction"]} %, schlimmstenfalls {o["worst_against"]} %')
+
+    rv = r["ratings_vs_price"]
+    out += ["", "## KI-Bewertung gegen Kursverlauf (alle bewerteten Meldungen in der Handelszeit, auch ohne Trade)",
+            f"- gesamt: {fo(rv['all'])}", f"- wie gehandelt würde (Richtung, Wirkung >= 1, Überraschung >= 7, Sicherheit >= 6): {fo(rv['tradeable'])}"]
+    out += [f"- Wirkung {k}: {fo(v)}" for k, v in rv["by_impact"].items()]
+    out += [f"- Quelle {k}: {fo(v)}" for k, v in rv["by_source"].items()]
     out += ["", "## Ausbruchs-Strategie",
             f'- in Richtung der Kurslücke: {fmt(r["orb"]["with_gap"])}',
             f'- gegen die Kurslücke: {fmt(r["orb"]["against_gap"])}',
@@ -169,6 +219,7 @@ def markdown(r):
     out += ["", "## Probleme",
             f'- Fehler nach Bereich: {r["errors"] or "keine"}',
             f'- Tagesverlust-Stopps: {r["halts"]}, verwaiste Positionen: {r["orphans"]}, nicht ausgeführte Einstiege: {r["no_fills"]}',
+            f'- Eingriffe des Feierabend-Wächters (er musste vor Börsenschluss selbst glattstellen): {r["guard_interventions"]}',
             "", "## Tage"]
     out += [f'- {d["day"]}: {d["pnl"]:+.2f} $, {d["trades"]} Trades, {d["errors"]} Fehler' for d in r["equity"]["by_day"]] or ["- keine Daten"]
     for title, key in (("Beste Trades", "best"), ("Schlechteste Trades", "worst")):

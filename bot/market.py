@@ -2,7 +2,7 @@
 import re
 from datetime import datetime, timedelta
 
-from .common import ET, now
+from .common import ET, iso, now
 
 EXCHANGES = {"NYSE", "NASDAQ", "ARCA", "AMEX", "BATS"}
 SYMBOL_RE = re.compile(r"^[A-Z]{1,5}$")
@@ -98,3 +98,45 @@ class Universe:
     async def shortable(self, symbol):
         a = await self.asset(symbol)
         return bool(a and a.get("shortable") and a.get("easy_to_borrow"))
+
+
+def summarize_daily(bars):
+    """Size and usual swing of a stock from its recent daily bars, or None if there is too little data."""
+    if len(bars) < 5:
+        return None
+    recent, swing = bars[-20:], bars[-14:]
+    dollar_volume = sum(b["v"] * (b.get("vw") or b["c"]) for b in recent) / len(recent)
+    daily_range = sum((b["h"] - b["l"]) / b["c"] for b in swing if b["c"]) / len(swing) * 100
+    size = ("very large" if dollar_volume >= 1e9 else "large" if dollar_volume >= 2e8
+            else "mid-sized" if dollar_volume >= 2e7 else "small")
+    return {"price": bars[-1]["c"], "dollar_volume": round(dollar_volume),
+            "daily_range_pct": round(daily_range, 2), "size": size}
+
+
+class StockStats:
+    """Per stock: traded value per day and usual daily swing, from full-market daily bars.
+
+    The KI needs these numbers to judge how much a piece of news matters for this company,
+    and the strategy uses the usual swing to scale stops and targets. Cached for the day.
+    """
+
+    def __init__(self, api):
+        self.api = api
+        self.cache = {}
+        self.day = None
+
+    async def get(self, symbols):
+        today = now().strftime("%Y-%m-%d")
+        if today != self.day:
+            self.cache.clear()
+            self.day = today
+        missing = [s for s in symbols if s not in self.cache]
+        if missing:
+            end = now().replace(hour=0, minute=0, second=0, microsecond=0)   # completed days only
+            try:
+                bars = await self.api.bars_multi(missing, "1Day", iso(end - timedelta(days=45)), iso(end), feed="sip")
+            except Exception:
+                return {s: self.cache.get(s) for s in symbols}   # try again next time
+            for s in missing:
+                self.cache[s] = summarize_daily(bars.get(s) or [])
+        return {s: self.cache.get(s) for s in symbols}

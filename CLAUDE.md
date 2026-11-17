@@ -20,6 +20,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/wires.py` | zweite Nachrichtenquelle: Pressemitteilungen von PR Newswire, Firmenname → Börsenkürzel |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
 | `tools/check.py` | Verbindungstest |
+| `tools/guard.py` | Feierabend-Wächter: schließt kurz vor Börsenschluss alles, falls der Bot es nicht getan hat |
 | `tools/weekly_stats.py` | Wochenstatistik aus den Protokollen |
 | `tools/backtest_orb.py` | grobe Rückrechnung der Ausbruchs-Strategie (braucht Alpaca-Schlüssel) |
 | `tools/replay_news.py` | einen vergangenen Tag durch die News-Strategie spielen (braucht beide Schlüssel) |
@@ -52,6 +53,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 
 - `logs/status.json` – Lebenszeichen des Bots (jede Minute neu, stündlich hochgeladen)
 - `logs/trades.jsonl` – ein Eintrag je abgeschlossenem Trade
-- `logs/events-JJJJ-MM-TT.jsonl` – alle Entscheidungen: bewertete Meldungen, abgelehnte
-  Signale mit Grund, Fehler
+- `logs/events-JJJJ-MM-TT.jsonl` – alle Entscheidungen: bewertete Meldungen (`news_classified`),
+  Kursverlauf danach (`news_outcome`), abgelehnte Signale mit Grund, Fehler, Eingriffe des
+  Wächters (`guard`)
 - `logs/daily/JJJJ-MM-TT.json` – Tagesabschluss

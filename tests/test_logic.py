@@ -9,10 +9,12 @@ from bot import executor as ex_mod
 from bot.common import ET, Journal, iso, load_config, parse_ts
 from bot.executor import Executor, position_size
 from bot.llm import is_noise, parse_verdict
-from bot.news_strategy import confirmation, stop_distance_pct
+from bot.market import summarize_daily
+from bot.news_strategy import confirmation, outcome, trade_plan, vol_factor
 from bot.orb_strategy import OrbStrategy, assess, breakout, opening_range, relative_volume
 from bot.orb_strategy import stop_distance_pct as orb_stop_pct
 from bot.wires import NameIndex, normalize, parse_feed, to_article
+from tools.guard import due
 from tools.weekly_stats import build, default_week, markdown, week_of
 
 CFG = load_config()
@@ -58,12 +60,80 @@ def test_confirmation():
     assert confirmation(100, 102, -1, 5000, 1000, 0.05, c) == ("abort", "moved_against")
 
 
-def test_stop_distance_clamped():
-    bars = [{"h": 100.2, "l": 99.8}] * 10
-    assert stop_distance_pct(bars, 100, 0.75, 0.4, 1.5) == pytest.approx(0.4)   # 0.3 % -> floor
-    wide = [{"h": 103, "l": 99}] * 10
-    assert stop_distance_pct(wide, 100, 0.75, 0.4, 1.5) == 1.5
-    assert stop_distance_pct([], 100, 0.75, 0.4, 1.5) == 0.4
+def test_verdict_from_damaged_answers():
+    cut_off = '{"symbol": "NKE", "direction": "none", "surprise": 2, "impact": 0, "confidence": 6, "category": "product", "reason": "Routine product showcase with upda'
+    v = parse_verdict(cut_off, ["NKE"])
+    assert v["direction"] == "none" and v["surprise"] == 2 and v["impact"] == 0 and v["confidence"] == 6
+    assert v["reason"].startswith("Routine product showcase")
+    quotes = '{"symbol": "TRIO", "direction": "up", "surprise": 7, "impact": 2, "confidence": 8, "category": "m&a", "reason": "The "buffered" fund is unrelated"}'
+    v = parse_verdict(quotes, ["TRIO"])
+    assert v["direction"] == "up" and v["impact"] == 2 and v["category"] == "m&a"
+    trailing = '{"symbol": "A", "direction": "down", "surprise": 8, "impact": 1, "confidence": 7} Note: {see above}'
+    assert parse_verdict(trailing, ["A"])["direction"] == "down"
+    assert parse_verdict('{"symbol": "A", "direction": "up", "surp', ["A"]) is None     # rating itself incomplete
+    assert parse_verdict('[1, 2]', ["A"]) is None
+
+
+def test_verdict_impact():
+    v = parse_verdict('{"symbol":"HD","direction":"up","surprise":8,"impact":2.4,"confidence":7}', ["HD"])
+    assert v["impact"] == 2
+    assert parse_verdict('{"symbol":"HD","direction":"up","impact":9}', ["HD"])["impact"] == 3
+    assert parse_verdict('{"symbol":"HD","direction":"up","surprise":8}', ["HD"])["impact"] == 1   # field missing
+
+
+def test_stock_size_and_swing():
+    assert summarize_daily([]) is None
+    bars = [{"h": 102.0, "l": 100.0, "c": 100.0, "v": 15_000_000, "vw": 101.0} for _ in range(30)]
+    st = summarize_daily(bars)
+    assert st["size"] == "very large" and st["daily_range_pct"] == 2.0 and st["dollar_volume"] == 1_515_000_000
+    small = summarize_daily([{"h": 5.4, "l": 5.0, "c": 5.0, "v": 100_000} for _ in range(10)])
+    assert small["size"] == "small" and small["daily_range_pct"] == 8.0
+    n = CFG["news"]
+    assert vol_factor(st, n) == pytest.approx(0.8)          # 2.0 % against the 2.5 % reference
+    assert vol_factor(small, n) == 2.0                      # capped
+    assert vol_factor({"daily_range_pct": 0.5}, n) == 0.6   # floored
+    assert vol_factor(None, n) == 1.0
+
+
+def test_trade_plan_by_impact():
+    n = CFG["news"]
+    calm = [{"h": 100.1, "l": 100.0}] * 5                   # 0.1 % range: no noise worth mentioning
+    assert trade_plan(1, 1.0, calm, 100, n) == (0.5, 2.0, 30)
+    assert trade_plan(2, 1.0, calm, 100, n) == (1.0, 3.0, 60)
+    assert trade_plan(3, 1.0, calm, 100, n) == (2.0, 3.0, 90)
+    assert trade_plan(2, 2.0, calm, 100, n)[0] == 2.0       # wild stock: stop twice as wide
+    assert trade_plan(1, 0.6, calm, 100, n)[0] == pytest.approx(0.3)
+    noisy = [{"h": 101.6, "l": 100.0}] * 5                  # 1.6 % range in the last minutes
+    assert trade_plan(1, 1.0, noisy, 100, n)[0] == pytest.approx(0.8)   # stop moves outside the noise
+    wild = [{"h": 106.0, "l": 100.0}] * 5
+    assert trade_plan(1, 1.0, wild, 100, n)[0] == 1.0       # but noise at most doubles it
+    assert trade_plan(3, 2.0, wild, 100, n)[0] == 4.0       # absolute cap
+    assert trade_plan(0, 1.0, calm, 100, n) == trade_plan(1, 1.0, calm, 100, n)   # never called with 0 in practice
+
+
+def test_outcome_after_news():
+    t0 = datetime(2026, 11, 17, 15, 0, 30, tzinfo=timezone.utc)
+    def bar(minute, c, h=None, l=None):
+        t = datetime(2026, 11, 17, 14, 55, tzinfo=timezone.utc) + timedelta(minutes=minute)
+        return {"t": iso(t), "c": c, "h": h or c, "l": l or c}
+    bars = [bar(i, 100.0) for i in range(5)]                 # 14:55-14:59, all complete before t0
+    bars += [bar(5, 100.5, h=100.8), bar(9, 101.0), bar(19, 102.0, h=103.0), bar(34, 101.5, l=99.0)]
+    o = outcome(bars, t0, until=t0 + timedelta(minutes=40))
+    assert o["ref_price"] == 100.0
+    assert o["ret_5"] == 1.0 and o["ret_15"] == 2.0 and o["ret_30"] == 1.5
+    assert o["ret_60"] is None                                # the hour is not over yet
+    assert o["max_up"] == 3.0 and o["max_down"] == -1.0
+    quiet = outcome(bars[:5], t0, until=t0 + timedelta(minutes=61))
+    assert quiet["ret_30"] == 0.0 and quiet["max_up"] == 0.0  # no trades after the news = no move
+    assert outcome(bars[5:], t0, until=t0 + timedelta(minutes=61)) is None   # no price from before the news
+
+
+def test_guard_acts_only_shortly_before_the_close():
+    clock = lambda left: {"is_open": True, "timestamp": "2026-11-17T15:00:00-05:00",
+                          "next_close": iso(datetime(2026, 11, 17, 20, 0, tzinfo=timezone.utc) + timedelta(minutes=left))}
+    assert not due(clock(30), 10) and not due(clock(8), 10)
+    assert due(clock(7), 10) and due(clock(1), 10)
+    assert not due({**clock(5), "is_open": False}, 10)
 
 
 def test_opening_range_and_breakout():
@@ -372,7 +442,14 @@ def test_weekly_stats(tmp_path):
     (logs / "events-2026-11-17.jsonl").write_text("\n".join(json.dumps(e) for e in [
         {"kind": "rejected", "stage": "confirm", "reason": "volume"},
         {"kind": "error", "where": "news_ws"},
-        {"kind": "news_classified", "llm_s": 2.0, "verdict": {"direction": "up", "surprise": 8}},
+        {"kind": "news_classified", "llm_s": 2.0, "verdict": {"direction": "up", "surprise": 8, "confidence": 7, "impact": 2}},
+        {"kind": "news_outcome", "source": "prnewswire", "direction": "up", "surprise": 8, "confidence": 7, "impact": 2,
+         "ret_5": 0.5, "ret_15": 1.0, "ret_30": 2.0, "ret_60": None, "max_up": 3.0, "max_down": -1.0},
+        {"kind": "news_outcome", "source": "prnewswire", "direction": "down", "surprise": 8, "confidence": 7, "impact": 2,
+         "ret_5": 0.2, "ret_15": 0.4, "ret_30": 1.0, "ret_60": 1.0, "max_up": 1.5, "max_down": -0.2},
+        {"kind": "news_outcome", "source": "fiscal.ai", "direction": "none", "surprise": 2, "confidence": 5, "impact": 0,
+         "ret_5": 0.0, "ret_15": 0.1, "ret_30": -0.1, "ret_60": 0.0, "max_up": 0.2, "max_down": -0.2},
+        {"kind": "guard", "positions": ["ACME 10"], "orders": 2},
     ]))
     (logs / "daily" / "2026-11-17.json").write_text(json.dumps(
         {"day": "2026-11-17", "equity_start": 100000, "equity_end": 100300, "pnl": 300, "trades": 1, "errors": 1}))
@@ -382,6 +459,13 @@ def test_weekly_stats(tmp_path):
     assert r["by_strategy"]["news"]["win_rate_pct"] == 100.0
     assert r["rejections"] == {"confirm:volume": 1} and r["errors"] == {"news_ws": 1}
     assert r["news"]["tradeable_verdicts"] == 1 and r["orb"]["with_gap"]["n"] == 1
+    rv = r["ratings_vs_price"]
+    big = rv["by_impact"]["groß"]
+    assert big["n"] == 2 and big["dir_move_30"] == 0.5 and big["hit_rate_30_pct"] == 50.0   # +2.0 and -1.0 in the predicted direction
+    assert big["best_in_direction"] == 1.6 and big["worst_against"] == -1.25
+    assert rv["by_impact"]["kaum"]["with_direction"] == 0 and rv["by_impact"]["kaum"]["abs_move_30"] == 0.1
+    assert rv["tradeable"]["n"] == 2 and rv["by_source"]["prnewswire"]["n"] == 2
+    assert r["guard_interventions"] == 1 and "KI-Bewertung gegen Kursverlauf" in markdown(r)
     assert "Wochenstatistik 2026-11-16 bis 2026-11-20" in markdown(r)
     assert default_week(datetime(2026, 11, 21).date()) == (start, end)          # Saturday -> same week
     assert default_week(datetime(2026, 11, 18).date())[0].isoformat() == "2026-11-09"
