@@ -1,28 +1,28 @@
 {
- "t": "2026-11-17T14:06:31Z",
- "version": "5ed07e24577224ebfba0bc9fa7ecfde63cb0da75",
+ "t": "2026-11-17T15:06:22Z",
+ "version": "39acd89c8e9bdb398f1c354ff73c6462905b4c59",
  "day": "2026-11-17",
  "trading_day": true,
- "market_open": false,
+ "market_open": true,
  "news_stream": true,
  "llm_available": true,
- "llm_calls_today": 509,
+ "llm_calls_today": 5,
  "news": {
-  "received": 840,
-  "classified": 509,
+  "received": 69,
+  "classified": 5,
   "candidates": 0
  },
  "wires": {
-  "polls": 1168,
-  "items": 514,
-  "matched": 96,
+  "polls": 208,
+  "items": 256,
+  "matched": 66,
   "errors": 0
  },
- "orb_stage": "idle",
- "orb_pool": 55,
+ "orb_stage": "done",
+ "orb_pool": 57,
  "orb_watching": [],
  "open_trades": [],
- "trades_today": 0,
+ "trades_today": 2,
  "errors_today": 0,
  "flattened": false
 }
