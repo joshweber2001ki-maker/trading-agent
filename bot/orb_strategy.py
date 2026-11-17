@@ -103,6 +103,7 @@ class OrbStrategy:
         self._save_news_pool()
         self.ranges = {}      # symbol -> opening range, gap, rvol (the watched candidates)
         self.fired = set()
+        self.failures = 0
         self.stage = "idle"   # idle -> pooled -> ranged -> done
 
     def add_candidate(self, symbol, **info):
@@ -121,18 +122,25 @@ class OrbStrategy:
         if not cfg["enabled"] or not s.trading_day or self.stage == "done":
             return
         t = now()
-        if self.stage == "idle" and t >= s.open - timedelta(minutes=4):
-            await self._build_pool()
-            self.stage = "pooled"
-        elif self.stage == "pooled" and t >= s.open + timedelta(minutes=cfg["range_min"], seconds=20):
-            await self._rank()
-            self.stage = "ranged" if self.ranges else "done"
-        elif self.stage == "ranged":
-            if t >= self.entry_deadline() or len(self.fired) >= len(self.ranges):
+        try:
+            if self.stage == "idle" and t >= s.open - timedelta(minutes=4):
+                await self._build_pool()
+                self.stage = "pooled"
+            elif self.stage == "pooled" and t >= s.open + timedelta(minutes=cfg["range_min"], seconds=20):
+                await self._rank()
+                self.stage = "ranged" if self.ranges else "done"
+            elif self.stage == "ranged":
+                if t >= self.entry_deadline() or len(self.fired) >= len(self.ranges):
+                    self.stage = "done"
+                    self.journal.event("orb_done", traded=sorted(self.fired), watched=sorted(self.ranges))
+                else:
+                    await self._watch()
+        except Exception as e:
+            # A failing step is retried on the next call, but only a few times: no retry storm.
+            self.failures += 1
+            self.journal.event("error", where=f"orb_{self.stage}", error=repr(e)[:300], failures=self.failures)
+            if self.failures >= 3:
                 self.stage = "done"
-                self.journal.event("orb_done", traded=sorted(self.fired), watched=sorted(self.ranges))
-            else:
-                await self._watch()
 
     async def _build_pool(self):
         for sym in self.cfg["static_pool"]:

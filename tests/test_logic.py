@@ -117,6 +117,22 @@ def test_orb_keeps_only_fresh_news_candidates_overnight(tmp_path):
     assert list(again.pool) == ["HD"] and again.pool["HD"]["verdict"]["surprise"] == 8
 
 
+def test_orb_gives_up_after_repeated_failures(tmp_path):
+    class Sess:
+        trading_day, day = True, "2026-11-17"
+        open = datetime.now(timezone.utc) - timedelta(minutes=10)
+
+    class BrokenApi:
+        async def snapshots(self, syms): raise RuntimeError("boom")
+
+    orb = OrbStrategy(BrokenApi(), CFG, Journal(tmp_path), Sess(), None, None, root=tmp_path)
+    orb.stage = "pooled"
+    orb.pool = {"NVDA": {"source": "static"}}
+    for _ in range(5):
+        asyncio.run(orb.step())
+    assert orb.stage == "done" and orb.failures == 3
+
+
 def test_company_name_matching():
     assets = {
         "HD": {"name": "Home Depot, Inc."}, "NUTX": {"name": "Nutex Health Inc. Common Stock"},
