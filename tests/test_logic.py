@@ -829,6 +829,163 @@ def test_speed_statistics_show_what_is_left_for_a_late_entry():
     assert speed_stats([])["n"] == 0
 
 
+# ── which model rates, and the models that rate along ────────────────────────
+class ModelHttp:
+    """Stands in for the Anthropic API: answers each call with the next prepared response."""
+    def __init__(self, *responses):
+        self.responses, self.bodies = list(responses), []
+
+    async def post(self, url, headers=None, json=None):
+        self.bodies.append(json)
+        status, data, hdrs = self.responses.pop(0)
+
+        class R:
+            status_code, headers, text = status, hdrs, str(data)
+            def json(self): return data
+        return R()
+
+
+ANSWER = '{"symbol": "ACME", "direction": "up", "surprise": 8, "impact": 2, "confidence": 7, "category": "guidance", "reason": "raised"}'
+
+
+def test_every_model_gets_a_request_it_accepts():
+    from bot.llm import Classifier
+    llm = CFG["llm"]
+    by_model = {m: Classifier("k", llm, model=m).request("x") for m in [llm["model"], *llm["shadow"]]}
+    # Opus always thinks: "disabled" would be refused with an HTTP 400, and the thinking needs room.
+    opus = by_model["claude-opus-5-5"]
+    assert opus["thinking"] == {"type": "adaptive"} and opus["output_config"] == {"effort": "medium"}
+    assert opus["max_tokens"] >= 2000
+    # Sonnet and Haiku answer without thinking, each switched off in the way that model accepts.
+    assert by_model["claude-sonnet-5-5"]["thinking"] == {"type": "between_tools"}
+    assert by_model["claude-haiku-5-5"]["thinking"] == {"type": "disabled"}
+    for m in ("claude-sonnet-5-5", "claude-haiku-5-5"):
+        assert by_model[m]["max_tokens"] == 300 and "output_config" not in by_model[m]
+    assert llm["fallback"] in llm["shadow"] and llm["model"] not in llm["shadow"]
+    with pytest.raises(ValueError):                                # Opus cannot be told not to think
+        Classifier("k", {**llm, "effort": {"claude-opus-5-5": "off"}}, model="claude-opus-5-5")
+    with pytest.raises(ValueError):
+        Classifier("k", {**llm, "effort": {"claude-opus-5-5": "maximal"}}, model="claude-opus-5-5")
+
+
+def test_rating_reads_the_answer_behind_the_thinking_and_reports_time_and_tokens(monkeypatch):
+    from bot import llm as llm_mod
+    from bot.llm import Classifier
+    waits = []
+
+    async def sleep(seconds):
+        waits.append(seconds)
+    monkeypatch.setattr(llm_mod.asyncio, "sleep", sleep)
+    art = {"headline": "Acme raises guidance", "summary": "", "source": "test", "created_at": ""}
+    ok = (200, {"content": [{"type": "thinking", "thinking": ""}, {"type": "text", "text": ANSWER}],
+                "usage": {"input_tokens": 900, "output_tokens": 420}, "stop_reason": "end_turn"},
+          {"anthropic-ratelimit-requests-limit": "4000"})
+
+    async def go(*responses):
+        c = Classifier("k", CFG["llm"], model="claude-opus-5-5")
+        c.http = ModelHttp(*responses)
+        return c, await c.rate(art, ["ACME"])
+
+    c, res = asyncio.run(go(ok))
+    assert res["verdict"]["direction"] == "up" and res["error"] is None and res["model"] == "claude-opus-5-5"
+    assert (res["tokens_in"], res["tokens_out"]) == (900, 420) and res["limits"]["requests"] == "4000"
+    assert res["seconds"] is not None and c.day_calls == 1
+    # busy server: one more try after the wait the server asks for (capped), then the answer counts
+    c, res = asyncio.run(go((529, {"error": "overloaded"}, {"retry-after": "30"}), ok))
+    assert res["verdict"] and len(c.http.bodies) == 2 and waits == [5.0]
+    # refused twice: an error, no verdict, and no third try
+    c, res = asyncio.run(go((429, {"error": "rate"}, {}), (429, {"error": "rate"}, {})))
+    assert res["verdict"] is None and res["error"].startswith("llm_http_429") and len(c.http.bodies) == 2
+    # a wrong request is not retried
+    c, res = asyncio.run(go((400, {"error": "thinking.type.disabled is not supported"}, {})))
+    assert res["error"].startswith("llm_http_400") and len(c.http.bodies) == 1
+    # the thinking used up all the room: no answer
+    c, res = asyncio.run(go((200, {"content": [{"type": "thinking", "thinking": ""}], "stop_reason": "max_tokens"}, {})))
+    assert res["verdict"] is None and res["error"].startswith("llm_cut_off")
+    # the old interface still works
+    async def old_way():
+        c = Classifier("k", CFG["llm"])
+        c.http = ModelHttp(ok)
+        return await c.classify(art, ["ACME"])
+    verdict, err = asyncio.run(old_way())
+    assert verdict["surprise"] == 8 and err is None
+
+
+class FakeModel:
+    """A model with a fixed opinion (or a fixed failure)."""
+    def __init__(self, model, direction="up", error=None, surprise=8):
+        self.model, self.direction, self.error, self.surprise, self.day_calls = model, direction, error, surprise, 0
+
+    async def rate(self, art, symbols, names=None, stats=None):
+        self.day_calls += 1
+        v = None if self.error else {"symbol": symbols[0], "direction": self.direction, "surprise": self.surprise,
+                                     "impact": 2, "confidence": 7, "category": "guidance", "reason": ""}
+        return {"verdict": v, "error": self.error, "model": self.model, "seconds": 1.5, "tokens_in": 900, "tokens_out": 80}
+
+
+def news_rig(tmp_path, decider, shadows=(), fallback=None):
+    from bot.news_strategy import NewsStrategy
+
+    class Sess:
+        def is_open(self): return True
+        def since_open_min(self): return 60
+        def to_close_min(self): return 200
+
+    class Uni:
+        async def asset(self, s): return {"symbol": s}
+        async def name(self, s): return "Acme Corp"
+
+    class Api:
+        async def snapshots(self, syms): return {s: {"latestTrade": {"p": 100.0}} for s in syms}
+
+    class Ex:
+        async def can_enter(self, strategy, sym): return True, ""
+
+    j = Journal(tmp_path)
+    news = NewsStrategy(Api(), CFG, j, Sess(), Uni(), Ex(), decider, shadows=shadows, fallback=fallback)
+    art = {"id": "a1", "headline": "Acme raises guidance", "summary": "", "source": "prnewswire",
+           "symbols": ["ACME"], "created_at": iso(datetime.now(timezone.utc))}
+
+    async def go():
+        plan = await news._classify(art, datetime.now(timezone.utc))
+        await asyncio.sleep(0.01)                                  # let the models that rate along finish
+        return plan
+    plan = asyncio.run(go())
+    rows = list(j.recent_events(1))
+    return plan, {k: [r for r in rows if r["kind"] == k] for k in
+                  ("news_classified", "news_shadow", "news_fallback", "news_skipped")}
+
+
+def test_models_in_the_shadow_rate_along_but_never_decide(tmp_path):
+    haiku, sonnet = FakeModel("claude-haiku-5-5", "up"), FakeModel("claude-sonnet-5-5", "down")
+    plan, ev = news_rig(tmp_path, FakeModel("claude-opus-5-5", "none"), [haiku, sonnet], "claude-haiku-5-5")
+    assert plan is None                                            # the deciding model saw nothing to trade
+    c = ev["news_classified"][0]
+    assert (c["model"], c["verdict"]["direction"], c["model_s"], c["tokens_out"]) == ("claude-opus-5-5", "none", 1.5, 80)
+    shadow = {r["model"]: r for r in ev["news_shadow"]}
+    assert set(shadow) == {"claude-haiku-5-5", "claude-sonnet-5-5"} and not ev["news_fallback"]
+    assert shadow["claude-haiku-5-5"]["verdict"]["direction"] == "up" and shadow["claude-sonnet-5-5"]["symbol"] == "ACME"
+    assert all(r["article"] == "a1" and "error" not in r for r in ev["news_shadow"])
+    # and the other way round: only the deciding model's rating makes a candidate
+    plan, ev = news_rig(tmp_path / "b", FakeModel("claude-opus-5-5", "up"), [FakeModel("claude-haiku-5-5", "none")])
+    assert plan[0] == "ACME" and plan[1]["direction"] == "up" and plan[4]["model"] == "claude-opus-5-5"
+
+
+def test_fallback_model_decides_only_when_the_main_model_fails(tmp_path):
+    broken = FakeModel("claude-opus-5-5", error="llm_http_529: overloaded")
+    plan, ev = news_rig(tmp_path, broken, [FakeModel("claude-haiku-5-5", "up"), FakeModel("claude-sonnet-5-5", "down")],
+                        "claude-haiku-5-5")
+    assert plan[1]["direction"] == "up" and plan[4]["model"] == "claude-haiku-5-5"
+    fb = ev["news_fallback"][0]
+    assert (fb["failed"], fb["used"]) == ("claude-opus-5-5", "claude-haiku-5-5") and "529" in fb["error"]
+    assert ev["news_classified"][0]["model"] == "claude-haiku-5-5" and len(ev["news_shadow"]) == 2
+    # no fallback named, or the fallback failed as well: the article is skipped with the error
+    plan, ev = news_rig(tmp_path / "b", broken, [FakeModel("claude-haiku-5-5", "up")])
+    assert plan is None and "529" in ev["news_skipped"][0]["reason"] and not ev["news_classified"]
+    plan, ev = news_rig(tmp_path / "c", broken, [FakeModel("claude-haiku-5-5", error="llm_network: timeout")], "claude-haiku-5-5")
+    assert plan is None and ev["news_skipped"] and ev["news_shadow"][0]["error"].startswith("llm_network")
+
+
 # ── the whole program against a simulated broker ─────────────────────────────
 def test_bot_starts_lists_filings_and_measures_after_the_close_without_trading(tmp_path, monkeypatch):
     """Start, begin the day, list SEC filings, run both measurements after the close, write the

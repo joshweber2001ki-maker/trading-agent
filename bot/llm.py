@@ -1,9 +1,17 @@
 """News classification with Claude via the Anthropic Messages API."""
+import asyncio
 import json
 import re
 import time
 
 import httpx
+
+API_URL = "https://api.anthropic.com/v1/messages"
+# How each model is told to answer without thinking first. None: this model always thinks.
+# (Sonnet 5.5 and Opus 5.5 reject "disabled" with an HTTP 400.)
+NO_THINKING = {"claude-haiku-5-5": "disabled", "claude-sonnet-5-5": "between_tools", "claude-opus-5-5": None}
+EFFORTS = ("off", "low", "medium", "high")
+RETRY_STATUS = (429, 500, 502, 503, 529)   # rate limit or a busy server: worth one more try
 
 SYSTEM = """You classify stock-market news for an intraday trading system. The system trades the
 continuation move in the minutes after a genuinely surprising, company-specific news item.
@@ -105,10 +113,17 @@ def parse_verdict(text: str, symbols):
 
 
 class Classifier:
-    def __init__(self, api_key: str, cfg: dict):
+    """One model that rates articles. The bot runs one that decides and may run more for comparison."""
+
+    def __init__(self, api_key: str, cfg: dict, model: str = None):
         self.key = api_key
-        self.model = cfg["model"]
-        self.thinking = cfg.get("thinking", False)
+        self.model = model or cfg["model"]
+        # How thoroughly the model thinks before it answers: "off" is the fastest.
+        self.effort = (cfg.get("effort") or {}).get(self.model, "off")
+        if self.effort not in EFFORTS:
+            raise ValueError(f"[llm.effort] {self.model}: {self.effort!r} is not one of {EFFORTS}")
+        if self.effort == "off" and NO_THINKING.get(self.model, "disabled") is None:
+            raise ValueError(f"{self.model} cannot answer without thinking: set [llm.effort] to low, medium or high")
         self.max_hour = cfg["max_calls_per_hour"]
         self.max_day = cfg["max_calls_per_day"]
         self.http = httpx.AsyncClient(timeout=cfg["timeout_s"])
@@ -136,12 +151,26 @@ class Classifier:
         return "%s (%s; %s company, about %s traded per day, usual daily swing %.1f %%, price $%.2f)" % (
             symbol, name or "?", stats["size"], traded, stats["daily_range_pct"], stats["price"])
 
-    async def classify(self, article: dict, symbols, names=None, stats=None):
-        """Returns (verdict | None, error | None)."""
+    def request(self, user: str) -> dict:
+        """The request body. The models differ in how thinking is switched off, and one cannot switch it off."""
+        body = {"model": self.model, "system": SYSTEM, "messages": [{"role": "user", "content": user}]}
+        if self.effort == "off":
+            # Without this the model reasons first, which costs seconds and output tokens.
+            body.update(max_tokens=300, thinking={"type": NO_THINKING.get(self.model, "disabled")})
+        else:
+            # The thinking counts against max_tokens: leave room for it before the short answer.
+            body.update(max_tokens=3000, thinking={"type": "adaptive"}, output_config={"effort": self.effort})
+        return body
+
+    async def rate(self, article: dict, symbols, names=None, stats=None) -> dict:
+        """Rate one article. Always returns a dict: verdict (None if it failed), error (None if it worked),
+        model, seconds for the call, tokens_in, tokens_out and the account's rate limits for this model."""
+        out = {"verdict": None, "error": None, "model": self.model, "seconds": None,
+               "tokens_in": None, "tokens_out": None, "limits": None}
         if not self.available:
-            return None, "no_api_key"
+            return {**out, "error": "no_api_key"}
         if not self.budget_ok():
-            return None, "llm_budget"
+            return {**out, "error": "llm_budget"}
         self.calls.append(time.monotonic())
         self.day_calls += 1
         names, stats = names or {}, stats or {}
@@ -152,27 +181,39 @@ class Classifier:
             f"Published: {article.get('created_at', '')}\nHeadline: {article.get('headline', '')}\n"
             f"Summary: {(article.get('summary') or '')[:1200]}"
         )
+        t0 = time.monotonic()
         try:
-            r = await self.http.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": self.key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    # Without this the model reasons first, which costs seconds and output tokens.
-                    "max_tokens": 2000 if self.thinking else 300,
-                    **({} if self.thinking else {"thinking": {"type": "disabled"}}),
-                    "system": SYSTEM,
-                    "messages": [{"role": "user", "content": user}],
-                },
-            )
+            for attempt in (1, 2):
+                r = await self.http.post(
+                    API_URL,
+                    headers={"x-api-key": self.key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                    json=self.request(user),
+                )
+                if r.status_code not in RETRY_STATUS or attempt == 2:
+                    break
+                try:
+                    wait = float(r.headers.get("retry-after") or 1.5)
+                except ValueError:
+                    wait = 1.5
+                await asyncio.sleep(min(wait, 5.0))
+            out["seconds"] = round(time.monotonic() - t0, 2)
             if r.status_code != 200:
-                return None, f"llm_http_{r.status_code}: {r.text[:150]}"
-            text = "".join(b.get("text", "") for b in r.json().get("content", []))
-        except httpx.HTTPError as e:
-            return None, f"llm_network: {e!r}"[:200]
+                return {**out, "error": f"llm_http_{r.status_code}: {r.text[:150]}"}
+            data = r.json()
+        except (httpx.HTTPError, ValueError) as e:
+            return {**out, "seconds": round(time.monotonic() - t0, 2), "error": f"llm_network: {e!r}"[:200]}
+        usage = data.get("usage") or {}
+        out.update(tokens_in=usage.get("input_tokens"), tokens_out=usage.get("output_tokens"),
+                   limits={k: r.headers.get(f"anthropic-ratelimit-{k}-limit") for k in ("requests", "input-tokens", "output-tokens")})
+        # A model that thinks first sends its thinking as separate blocks ahead of the answer.
+        text = "".join(b.get("text", "") for b in data.get("content") or [] if b.get("type") == "text")
         v = parse_verdict(text, symbols)
-        return (v, None) if v else (None, f"llm_unparseable: {text[:500]!r}")
+        if v:
+            return {**out, "verdict": v}
+        why = "llm_cut_off" if data.get("stop_reason") == "max_tokens" else "llm_unparseable"
+        return {**out, "error": f"{why}: {text[:500]!r}"}
+
+    async def classify(self, article: dict, symbols, names=None, stats=None):
+        """Returns (verdict | None, error | None)."""
+        res = await self.rate(article, symbols, names, stats)
+        return res["verdict"], res["error"]

@@ -126,8 +126,20 @@ lookback_days   = 5      # so weit zurück werden noch nicht gemessene Meldungen
 max_events      = 1500   # höchstens so viele Meldungen pro Lauf
 
 [llm]
-model              = "claude-haiku-5-5"
-thinking           = false   # true = gründlicher, aber mehrere Sekunden langsamer
-max_calls_per_hour = 400
-max_calls_per_day  = 2000    # eine Bewertung kostet rund 0,0001 $, das Tageslimit also höchstens etwa 0,20 $
+# Welches Modell die Meldungen bewertet. Entscheidung Josh 17.11.2026: Vom 18. bis 20.11. entscheidet
+# Opus; Haiku (bis dahin das entscheidende Modell) und Sonnet bewerten jede Meldung in der Handelszeit
+# zum Vergleich mit ("Schatten"), ohne Einfluss auf den Handel. Auswertung im Wochenrückblick.
+model              = "claude-opus-5-5"
+shadow             = ["claude-haiku-5-5", "claude-sonnet-5-5"]
+fallback           = "claude-haiku-5-5"   # dessen Bewertung zählt, wenn das entscheidende Modell nicht antwortet (muss in shadow stehen)
+parallel           = 6       # so viele Meldungen werden gleichzeitig bewertet
+max_calls_per_hour = 300     # je Modell
+max_calls_per_day  = 600     # je Modell. Eine Bewertung kostet grob: Opus 1-3 Cent, Sonnet 0,3 Cent, Haiku 0,02 Cent
 timeout_s          = 20
+
+# Wie gründlich ein Modell vor der Antwort nachdenkt: "off" = gar nicht (am schnellsten), sonst
+# "low", "medium" oder "high" (gründlicher, aber Sekunden langsamer und teurer). Opus kann nicht ohne.
+[llm.effort]
+"claude-opus-5-5"   = "medium"
+"claude-sonnet-5-5" = "off"
+"claude-haiku-5-5"  = "off"

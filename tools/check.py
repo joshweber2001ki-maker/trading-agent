@@ -62,15 +62,20 @@ async def main():
             return auth.get("msg")
 
     async def llm():
-        c = Classifier(env("ANTHROPIC_API_KEY", ""), cfg["llm"])
-        if not c.available:
+        """The deciding model and the ones rating along: each must accept the request the bot sends."""
+        llm_key = env("ANTHROPIC_API_KEY", "")
+        if not llm_key:
             return "kein ANTHROPIC_API_KEY gesetzt (News-Strategie bleibt inaktiv)"
-        v, err = await c.classify(
-            {"headline": "Acme Corp raises full-year guidance well above analyst expectations",
-             "summary": "", "source": "test", "created_at": ""}, ["ACME"])
-        if err:
-            raise RuntimeError(err)
-        return v
+        art = {"headline": "Acme Corp raises full-year guidance well above analyst expectations",
+               "summary": "", "source": "test", "created_at": ""}
+        out = []
+        for m in [cfg["llm"]["model"], *[x for x in cfg["llm"].get("shadow", []) if x != cfg["llm"]["model"]]]:
+            r = await Classifier(llm_key, cfg["llm"], model=m).rate(art, ["ACME"])
+            if r["error"]:
+                raise RuntimeError(f"{m}: {r['error']}")
+            v = r["verdict"]
+            out.append(f'{m}: {v["direction"]}, Überraschung {v["surprise"]}, Wirkung {v["impact"]}, {r["seconds"]} s')
+        return "; ".join(out)
 
     async def order_test():
         o = await api.submit({

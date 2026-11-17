@@ -8,7 +8,7 @@ import asyncio
 import json
 from datetime import timedelta
 
-from .common import iso, now, parse_ts
+from .common import iso, now, parse_ts, spawn
 from .llm import is_noise
 
 HORIZONS = (5, 15, 30, 60)
@@ -80,16 +80,21 @@ def outcome(bars, t0, until):
 
 
 class NewsStrategy:
-    def __init__(self, api, cfg, journal, session, universe, executor, classifier, orb=None, stats=None):
+    def __init__(self, api, cfg, journal, session, universe, executor, classifier, orb=None, stats=None,
+                 shadows=(), fallback=None):
         self.api, self.journal, self.session = api, journal, session
         self.universe, self.executor, self.llm, self.orb = universe, executor, classifier, orb
+        # Further models that rate the same articles during the session. They are logged for
+        # comparison and decide nothing - except the one named as fallback, whose rating counts
+        # when the deciding model fails to answer.
+        self.shadows, self.fallback = list(shadows), fallback
         self.stock_stats = stats
         self.cfg = cfg["news"]
         self.orb_min_surprise = cfg["orb"]["premarket_news_min_surprise"]
         self.premarket_from = cfg["orb"]["premarket_news_from"]
         self.seen = set()          # article ids and (symbol, headline) pairs already handled
         self.recent = {}           # symbol -> time of the last trade candidate
-        self.sem = asyncio.Semaphore(6)
+        self.sem = asyncio.Semaphore(cfg.get("llm", {}).get("parallel", 6))
         self.stats = {"received": 0, "classified": 0, "candidates": 0}
 
     def reset_day(self):
@@ -163,17 +168,29 @@ class NewsStrategy:
         names = {s: await self.universe.name(s) for s in tradable}
         stats = await self.stock_stats.get(tradable) if self.stock_stats else {}
         snap_task = asyncio.create_task(self.api.snapshots(tradable))
-        verdict, err = await self.llm.classify(art, tradable, names, stats)
+        others = {}
+        if phase == "live":
+            others = {c.model: spawn(self._shadow(c, art, tradable, names, stats, dict(base))) for c in self.shadows}
+        res = await self.llm.rate(art, tradable, names, stats)
+        if res["error"] and self.fallback in others:
+            alt = await others[self.fallback]
+            if alt["verdict"]:
+                self.journal.event("news_fallback", failed=res["model"], error=res["error"][:200], used=alt["model"], **base)
+                res = alt
         snaps = await snap_task
-        if err:
-            return skip(err)
+        if res["error"]:
+            return skip(res["error"])
         self.stats["classified"] += 1
+        verdict = res["verdict"]
         sym = verdict["symbol"]
         st = stats.get(sym)
         factor = vol_factor(st, self.cfg)
+        # llm_s counts from the arrival of the article (including the wait for a free slot),
+        # model_s is the call to the model alone.
         base.update(symbol=sym, verdict=verdict, age_s=round(age), size=(st or {}).get("size"),
                     daily_range_pct=(st or {}).get("daily_range_pct"), received=iso(received),
-                    llm_s=round((now() - received).total_seconds(), 1))
+                    llm_s=round((now() - received).total_seconds(), 1), model=res["model"],
+                    model_s=res["seconds"], tokens_in=res["tokens_in"], tokens_out=res["tokens_out"])
         self.journal.event("news_classified", **base)
 
         if phase == "premarket":
@@ -203,6 +220,21 @@ class NewsStrategy:
             return self.journal.event("rejected", stage="pre_confirm", reason="no_price", **base)
         ref = float(snap["latestTrade"]["p"])
         return sym, verdict, ref, received, base, factor
+
+    async def _shadow(self, clf, art, tradable, names, stats, base):
+        """Another model rates the same article. The result is logged (news_shadow) and returned."""
+        try:
+            res = await clf.rate(art, tradable, names, stats)
+        except Exception as e:   # a comparison must never disturb the trading path
+            res = {"verdict": None, "error": repr(e)[:200], "model": clf.model, "seconds": None,
+                   "tokens_in": None, "tokens_out": None}
+        v = res["verdict"]
+        self.journal.event(
+            "news_shadow", **base, model=res["model"], symbol=v["symbol"] if v else None, verdict=v,
+            model_s=res["seconds"], tokens_in=res["tokens_in"], tokens_out=res["tokens_out"],
+            **({"error": res["error"][:200]} if res["error"] else {}),
+        )
+        return res
 
     async def _confirm_and_enter(self, sym, verdict, ref, received, base, factor):
         # A calm stock confirms with a smaller move than a wild one.
@@ -240,7 +272,7 @@ class NewsStrategy:
                     "target_r": target_r, "max_hold_min": max_hold,
                     "meta": {
                         "article": base["article"], "headline": base["headline"], "source": base["source"],
-                        "verdict": verdict, "ref_price": ref, "vol_factor": round(factor, 2),
+                        "verdict": verdict, "model": base.get("model"), "ref_price": ref, "vol_factor": round(factor, 2),
                         "size": base.get("size"),
                         "news_to_signal_s": round((now() - received).total_seconds(), 1) + base["age_s"],
                         "stop_dist_pct": round(stop_pct, 3), "confirm": detail,

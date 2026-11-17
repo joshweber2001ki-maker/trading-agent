@@ -47,11 +47,14 @@ class Bot:
         self.session = Session(self.api)
         self.universe = Universe(self.api)
         self.executor = Executor(self.api, self.cfg, self.journal, self.session, self.universe)
-        self.llm = Classifier(env("ANTHROPIC_API_KEY", ""), self.cfg["llm"])
+        llm_key = env("ANTHROPIC_API_KEY", "")
+        self.llm = Classifier(llm_key, self.cfg["llm"])                      # this model's rating decides
+        self.shadows = [Classifier(llm_key, self.cfg["llm"], model=m)        # these only rate along for comparison
+                        for m in self.cfg["llm"].get("shadow", []) if m != self.llm.model]
         self.orb = OrbStrategy(self.api, self.cfg, self.journal, self.session, self.universe, self.executor)
         self.news = NewsStrategy(
             self.api, self.cfg, self.journal, self.session, self.universe, self.executor, self.llm, self.orb,
-            stats=StockStats(self.api),
+            stats=StockStats(self.api), shadows=self.shadows, fallback=self.cfg["llm"].get("fallback"),
         )
         self.wires = Wires(self.cfg["wires"], self.universe, self.news.on_article, self.journal)
         # Measurement only, no trading: SEC filings as a list, and how fast prices react to announcements.
@@ -145,7 +148,8 @@ class Bot:
         self.journal.status({
             "version": self.version, "day": self.day, "trading_day": s.trading_day,
             "market_open": s.is_open(), "news_stream": self.ws_connected,
-            "llm_available": self.llm.available, "llm_calls_today": self.llm.day_calls,
+            "llm_available": self.llm.available, "llm_model": self.llm.model, "llm_calls_today": self.llm.day_calls,
+            "llm_shadow_calls": {c.model: c.day_calls for c in self.shadows},
             "news": self.news.stats, "wires": self.wires.stats, "edgar": self.edgar.stats,
             "orb_stage": self.orb.stage, "orb_pool": len(self.orb.pool), "orb_watching": sorted(self.orb.ranges),
             "open_trades": [
@@ -165,7 +169,8 @@ class Bot:
         self.orb.reset_day()
         self.wires.reset_day()
         self.edgar.reset_day()
-        self.llm.reset_day()
+        for c in [self.llm, *self.shadows]:
+            c.reset_day()
         try:
             universe = await self.universe.load()
         except Exception as e:  # keep yesterday's list (or per-symbol lookups) if this fails
@@ -176,7 +181,8 @@ class Bot:
         self.journal.event(
             "day_start", day=self.day, trading_day=self.session.trading_day, universe=universe,
             equity=self.start_equity, last_equity=float(a.get("last_equity") or 0) or None,
-            llm=self.llm.available, news=self.cfg["news"]["enabled"], orb=self.cfg["orb"]["enabled"],
+            llm=self.llm.available, llm_model=self.llm.model, llm_shadow=[c.model for c in self.shadows],
+            news=self.cfg["news"]["enabled"], orb=self.cfg["orb"]["enabled"],
         )
         if self.session.trading_day and now() >= self.session.open:
             # Started mid-session: the opening range is gone, skip ORB today.
@@ -189,7 +195,8 @@ class Bot:
         summary = {
             "day": self.day, **day_result(await self.api.account(), self.start_equity),
             "trades": self.executor.trades_today, "news": self.news.stats, "wires": self.wires.stats,
-            "llm_calls": self.llm.day_calls, "errors": self.errors,
+            "llm_model": self.llm.model, "llm_calls": self.llm.day_calls,
+            "llm_shadow_calls": {c.model: c.day_calls for c in self.shadows}, "errors": self.errors,
             "orb_watched": sorted(self.orb.ranges), "orb_traded": sorted(self.orb.fired),
         }
         if not (self.journal.dir / "daily" / f"{self.day}.json").exists():  # keep the first summary after a restart
