@@ -589,6 +589,11 @@ def test_weekly_stats_put_right_a_wrong_record_and_a_restarted_day(tmp_path):
     days = {d["day"]: d["pnl"] for d in r["equity"]["by_day"]}
     assert days == {"2026-11-17": round(102068.67 - 102481.39, 2), "2026-11-18": -5.0}
     assert r["equity"]["start"] == 102481.39 and r["orphans"] == 1
+    # a later start on the same day logged the broker's value at the previous close: that is the better start
+    with open(logs / "events-2026-11-17.jsonl", "a") as f:
+        f.write("\n" + json.dumps({"t": "2026-11-17T21:07:19Z", "kind": "day_start", "equity": 102068.67, "last_equity": 102540.06}))
+    again = build(tmp_path, *week_of(datetime(2026, 11, 17).date()))["equity"]
+    assert again["start"] == 102540.06 and again["by_day"][0]["pnl"] == round(102068.67 - 102540.06, 2)
     md = markdown(r)
     assert "Nachträglich richtiggestellt: PEP" in md and "verbucht -507.65 $" in md and "tatsächlich -35.75 $" in md
     assert "Ausstieg nicht bestätigt" in md and "XYZ" in md and "2026-11-17: -412.72 $" in md

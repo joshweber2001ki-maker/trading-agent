@@ -71,12 +71,15 @@ def day_result(daily, events):
 
     Summaries written from 2026-11-18 on measure against the broker's value at the previous close.
     Older ones measured from the bot's last start, which hides everything before a restart during
-    the day; for those the bot's first reading of that day is the start.
+    the day. For those the start is the previous close if a later start of the bot logged it that
+    day, otherwise the bot's first reading of the day.
     """
     if daily.get("basis") == "last_close":
         return daily["equity_start"], daily["pnl"]
-    first = next((e["equity"] for e in events if e["kind"] == "day_start" and e.get("equity")), None)
-    start = first if first is not None else daily["equity_start"]
+    starts = [e for e in events if e["kind"] == "day_start"]
+    last_close = next((e["last_equity"] for e in starts if e.get("last_equity")), None)
+    first = next((e["equity"] for e in starts if e.get("equity")), None)
+    start = last_close or first or daily["equity_start"]
     return start, round(daily["equity_end"] - start, 2)
 
 
