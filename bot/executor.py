@@ -337,11 +337,27 @@ class Executor:
         await self.close_orphans()
 
     async def close_orphans(self):
+        """Close positions in the account that the bot is not tracking. Never raises."""
         tracked = {t.symbol for t in self.trades.values()}
-        for p in await self.api.positions():
-            if p["symbol"] not in tracked:
-                self.journal.event("orphan", symbol=p["symbol"], qty=p["qty"], action="closed")
-                for o in await self.api.open_orders():
-                    if o["symbol"] == p["symbol"]:
+        try:
+            positions = await self.api.positions()
+        except Exception as e:
+            self.journal.event("error", where="orphans", error=repr(e)[:300])
+            return
+        for p in positions:
+            sym = p["symbol"]
+            if sym in tracked:
+                continue
+            try:
+                # Cancels are asynchronous: wait until the symbol's orders have released the shares.
+                for _ in range(10):
+                    mine = [o for o in await self.api.open_orders() if o["symbol"] == sym]
+                    if not mine:
+                        break
+                    for o in mine:
                         await self.api.cancel(o["id"])
-                await self.api.close_position(p["symbol"])
+                    await asyncio.sleep(1)
+                await self.api.close_position(sym)
+                self.journal.event("orphan", symbol=sym, qty=p["qty"], action="closed")
+            except Exception as e:
+                self.journal.event("error", where="orphans", symbol=sym, error=repr(e)[:300])
