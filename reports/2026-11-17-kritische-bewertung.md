@@ -88,8 +88,11 @@ Vergleich für den 16.11., 26 Aktien:
   Analystenerwartungen. Bei Quartalszahlen ist sie deshalb fast blind.
 - Die Wirkungs-Stufe ist eine ungeprüfte Schätzung. Antworten sind nicht reproduzierbar,
   ein Modell-Update kann sie verschieben.
-- Zuordnung Firmenname → Kürzel: 78 von 301 Meldungen zugeordnet; der Rest sind nicht
-  börsennotierte Firmen oder Namen, die nicht exakt passen.
+- Zuordnung Firmenname → Kürzel: 96 von 514 Pressemitteilungen zugeordnet (Stand 14:06 UTC);
+  der Rest sind nicht börsennotierte Firmen oder Namen, die nicht exakt passen.
+- **Budget knapp:** In der Stunde vor der Eröffnung liefen 345 Bewertungen, erlaubt sind 400
+  pro Stunde und 2.000 pro Tag. An Tagen mit vielen Quartalszahlen greift die Grenze; dann
+  fehlen Kandidaten, sichtbar nur im Protokoll (`news_skipped`, Grund `llm_budget`).
 
 ## 6. Betrieb und Sicherheit
 
@@ -121,6 +124,7 @@ Paper-Ergebnisse sind eine Obergrenze.
 | V7 | Stop und Ziel nach der Ausführung vom echten Einstiegskurs rechnen | 4.3 | mehr Order-Schritte |
 | V8 | Abgleich ohne root, Neustart über einen festen Auslöser | 6.2 | einmaliger Umbau am Server |
 | V9 | Täglicher Kontrolllauf in der Cloud mit Push-Nachricht bei Stillstand | 6.3 | ein kurzer Lauf pro Tag |
+| V11 | KI-Budget auf 800 pro Stunde und 5.000 pro Tag anheben | 5 | Kosten: bei rund 0,0001 $ je Bewertung höchstens etwa 0,50 $ pro Tag |
 | V10 | Echtzeitdaten des Gesamtmarkts (Alpaca „Algo Trader Plus", 99 $/Monat) erst buchen, wenn die Folgekurse zeigen, dass nach zwei Minuten noch Bewegung übrig ist | 3 | Kosten |
 
 **Abbruchkriterium für die News-Idee** (Vorschlag): Nach vier Wochen oder 30 Meldungen je

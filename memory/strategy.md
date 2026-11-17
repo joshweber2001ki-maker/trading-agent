@@ -149,5 +149,5 @@ Deshalb die zweite Quelle.
   je Stufe statt fester Werte; Mitschreiben der Kursverläufe; Feierabend-Wächter.
 - 2026-11-17 (ohne Einfluss auf den Handel): Kursverläufe nach Meldungen werden nach
   Börsenschluss mit Kursen des gesamten Marktes gemessen statt laufend mit IEX-Kursen;
-  Rückrechnung kann mit Kursen des gesamten Marktes rechnen. Kritische Bewertung mit zehn
+  Rückrechnung kann mit Kursen des gesamten Marktes rechnen. Kritische Bewertung mit elf
   offenen Vorschlägen in `reports/2026-11-17-kritische-bewertung.md`.
