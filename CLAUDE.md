@@ -1,7 +1,9 @@
 # Trading-Bot (Alpaca Paper-Trading)
 
-Stand: 2026-11-17. Zweck: zwei kurzfristige Strategien mit großen Positionen im
-**Paper-Konto** testen. Echtgeld ist nicht vorgesehen; `bot/main.py` verweigert den Start,
+Stand: 2026-11-17. Zweck: kurzfristigen Handel nach Unternehmensmeldungen mit großen
+Positionen im **Paper-Konto** testen. Die zweite Strategie (Ausbruch aus der Eröffnungsspanne)
+ist seit dem 17.11.2026 auf Joshs Entscheidung abgeschaltet (`[orb] enabled = false`); der
+Code bleibt im Repo. Echtgeld ist nicht vorgesehen; `bot/main.py` verweigert den Start,
 wenn `APCA_BASE_URL` nicht auf das Paper-Konto zeigt.
 
 ## Aufbau
@@ -14,7 +16,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 |---|---|
 | `config.toml` | alle Stellschrauben beider Strategien und der Risikogrenzen |
 | `bot/news_strategy.py` | Meldung → KI-Bewertung → Bestätigung durch Kurs und Volumen → Einstieg |
-| `bot/orb_strategy.py` | Ausbruch aus der Eröffnungsspanne bei Aktien mit hohem relativem Volumen |
+| `bot/orb_strategy.py` | Ausbruch aus der Eröffnungsspanne (abgeschaltet seit 17.11.2026) |
 | `bot/executor.py` | Positionsgröße, Risikogrenzen, Order mit Stop und Ziel, Zeitlimit, Glattstellen |
 | `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API |
 | `bot/wires.py` | zweite Nachrichtenquelle: Pressemitteilungen von PR Newswire, Firmenname → Börsenkürzel |
@@ -53,7 +55,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 
 - `logs/status.json` – Lebenszeichen des Bots (jede Minute neu, stündlich hochgeladen)
 - `logs/trades.jsonl` – ein Eintrag je abgeschlossenem Trade
-- `logs/events-JJJJ-MM-TT.jsonl` – alle Entscheidungen: bewertete Meldungen (`news_classified`),
-  Kursverlauf danach (`news_outcome`), abgelehnte Signale mit Grund, Fehler, Eingriffe des
-  Wächters (`guard`)
+- `logs/events-JJJJ-MM-TT.jsonl` – alle Entscheidungen: jede zugeordnete Pressemitteilung mit
+  Veröffentlichungszeit (`wire_item`), bewertete Meldungen (`news_classified`), Kursverlauf
+  danach (`news_outcome`), abgelehnte Signale mit Grund, Fehler, Eingriffe des Wächters (`guard`)
 - `logs/daily/JJJJ-MM-TT.json` – Tagesabschluss

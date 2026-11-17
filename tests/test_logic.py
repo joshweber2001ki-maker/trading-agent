@@ -18,6 +18,7 @@ from tools.guard import due
 from tools.weekly_stats import build, default_week, markdown, week_of
 
 CFG = load_config()
+ORB_ON = {**CFG, "orb": {**CFG["orb"], "enabled": True}}   # the strategy's logic is tested whether or not it is switched on
 
 
 def test_parse_ts_nanoseconds():
@@ -195,7 +196,7 @@ def test_orb_gives_up_after_repeated_failures(tmp_path):
     class BrokenApi:
         async def snapshots(self, syms): raise RuntimeError("boom")
 
-    orb = OrbStrategy(BrokenApi(), CFG, Journal(tmp_path), Sess(), None, None, root=tmp_path)
+    orb = OrbStrategy(BrokenApi(), ORB_ON, Journal(tmp_path), Sess(), None, None, root=tmp_path)
     orb.stage = "pooled"
     orb.pool = {"NVDA": {"source": "static"}}
     for _ in range(5):
@@ -251,6 +252,36 @@ def test_wire_feed_to_articles():
     a = arts[0]
     assert a["created_at"] == "2026-11-17T10:43:00Z" and a["source"] == "prnewswire" and a["max_age_s"] == 420
     assert a["id"].startswith("prnewswire:") and a["headline"] == "The Home Depot Names New CEO"
+
+
+def test_every_matched_release_is_logged_with_its_publication_time(tmp_path):
+    from bot.wires import Wires
+
+    class Resp:
+        status_code, text, headers = 200, FEED, {}
+        def raise_for_status(self): pass
+
+    class Http:
+        async def get(self, url, headers=None): return Resp()
+
+    class Uni:
+        cache = {"HD": {"name": "Home Depot, Inc."}, "NUTX": {"name": "Nutex Health Inc. Common Stock"}}
+
+    got = []
+    async def on_article(a): got.append(a["symbols"][0])
+
+    async def run():
+        w = Wires(CFG["wires"], Uni(), on_article, Journal(tmp_path))
+        w.http = Http()
+        await w.poll("https://example.invalid/feed.rss")
+        await w.poll("https://example.invalid/feed.rss")      # the same items again: nothing new
+        await asyncio.sleep(0)
+        return w.stats
+    stats = asyncio.run(run())
+    rows = [json.loads(l) for f in (tmp_path / "logs").glob("events-*.jsonl") for l in f.read_text().splitlines()]
+    items = [r for r in rows if r["kind"] == "wire_item"]
+    assert sorted(got) == ["HD", "NUTX"] and stats["matched"] == 2 and stats["items"] == 4
+    assert [(r["symbol"], r["published"]) for r in items][0] == ("HD", "2026-11-17T10:43:00Z") and len(items) == 2
 
 
 # ── simulated broker ─────────────────────────────────────────────────────────

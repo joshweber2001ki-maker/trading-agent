@@ -111,7 +111,17 @@ Vergleich für den 16.11., 26 Aktien:
 Wenige Trades pro Woche, rund 60 Stellschrauben. Belastbare Aussagen brauchen Monate.
 Paper-Ergebnisse sind eine Obergrenze.
 
-## Offene Vorschläge (Status: offen, Entscheidung Josh)
+## Stand der Vorschläge (17.11.2026, 15:40 Uhr)
+
+- **V6 entschieden:** Josh schaltet die Ausbruchs-Strategie ab (aktiv ab 18.11.). Damit
+  entfallen V2 und V11 (außerhalb der Handelszeit wird nichts mehr bewertet).
+- **V1 zugesagt:** Josh erzeugt die Alpaca-Schlüssel neu und trägt sie selbst ein.
+- **Neu, Wunsch von Josh:** deutlich schneller nach einer Meldung handeln, ohne Kosten
+  (Testabos sind in Ordnung). Messungen dazu stehen in `memory/strategy.md` unter „Tempo".
+  Daraus die Vorschläge V12 bis V15 unten.
+- Alle übrigen Vorschläge sind offen.
+
+## Vorschläge (Entscheidung Josh)
 
 | Nr. | Was | Warum | Risiko |
 |---|---|---|---|
@@ -126,6 +136,11 @@ Paper-Ergebnisse sind eine Obergrenze.
 | V9 | Täglicher Kontrolllauf in der Cloud mit Push-Nachricht bei Stillstand | 6.3 | ein kurzer Lauf pro Tag |
 | V11 | KI-Budget auf 800 pro Stunde und 5.000 pro Tag anheben | 5 | Kosten: bei rund 0,0001 $ je Bewertung höchstens etwa 0,50 $ pro Tag |
 | V10 | Echtzeitdaten des Gesamtmarkts (Alpaca „Algo Trader Plus", 99 $/Monat) erst buchen, wenn die Folgekurse zeigen, dass nach zwei Minuten noch Bewegung übrig ist | 3 | Kosten |
+
+| V12 | Tempo-Messung: zu jeder Pressemitteilung und Pflichtmitteilung den Kursverlauf im Sekundentakt aus Handelsdaten des gesamten Marktes nachmessen (kostenlos, 15 Minuten verzögert) | zeigt vor jeder Ausgabe, wie viel Bewegung nach 2 s, 10 s, 40 s und 2 min noch übrig ist | keins für den Handel; für den SEC-Feed braucht es eine Kontaktadresse in der Kennung |
+| V13 | WireAlpha (laut Anbieter kostenlos und in Echtzeit) anschließen und die Verzögerung gegen die Veröffentlichungszeit messen | einzige kostenlose Quelle, die Echtzeit verspricht | unbekannter Anbieter, Angaben ungeprüft; Josh muss ein Konto anlegen |
+| V14 | RTPR sieben Tage testen (danach 139 $/Monat, Zahlungsdaten nötig) | einziger gefundener Anbieter mit Echtzeit-Schnittstelle für Privatkunden und Testzeitraum | Kosten, wenn nicht rechtzeitig gekündigt; erst nach V12 und V15 sinnvoll |
+| V15 | Sofort-Einstieg nach der KI-Bewertung statt bis zu 5 Minuten auf Bestätigung zu warten; Handel auch vor und nach der regulären Handelszeit | ohne das nützt eine schnelle Quelle nichts; über 90 % der Pflichtmitteilungen kommen außerhalb der Handelszeit | Strategieänderung; außerhalb der Handelszeit weite Spannen, keine Stop-Orders beim Broker, Paper-Ergebnisse dort besonders unzuverlässig |
 
 **Abbruchkriterium für die News-Idee** (Vorschlag): Nach vier Wochen oder 30 Meldungen je
 Wirkungs-Stufe aus Pressemitteilungen muss die Bewegung in vorhergesagter Richtung nach

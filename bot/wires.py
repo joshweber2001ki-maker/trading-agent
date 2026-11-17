@@ -141,6 +141,11 @@ class Wires:
             art = to_article(item, self.index, self.universe.cache, "prnewswire", self.cfg["max_age_s"])
             if art:
                 self.stats["matched"] += 1
+                # Every matched release with its publication time, at any hour and whether or not
+                # it is rated: the list cannot be rebuilt later (the feed only holds the newest
+                # items), and it is what a study of how fast prices react needs.
+                self.journal.event("wire_item", id=art["id"], symbol=art["symbols"][0], published=art["created_at"],
+                                   headline=art["headline"][:140], source=art["source"], company=art["company"][:60])
                 spawn(self.on_article(art))
 
     async def run(self):

@@ -81,7 +81,12 @@ Börsenschluss, mit Kursen des gesamten Marktes (die sind kostenlos, sobald sie 
 sind). Die IEX-Kurse, die der Bot live sieht, haben bei kleineren Aktien Lücken von Minuten
 bis Stunden; damit sähe es so aus, als hätte sich nach der Meldung nichts bewegt.
 
-## Strategie 2: Ausbruch aus der Eröffnungsspanne
+## Strategie 2: Ausbruch aus der Eröffnungsspanne (abgeschaltet seit 2026-11-17)
+
+**Josh hat die Strategie am 17.11.2026 abgeschaltet** (`[orb] enabled = false`), weil die kurze
+Form in der Rückrechnung schon vor Kosten verliert. Damit bewertet die KI auch keine Meldungen
+außerhalb der Handelszeit mehr; sie dienten nur als Kandidaten für die Eröffnung. Die
+Beschreibung bleibt zum Nachlesen stehen.
 
 Idee: Aktien, die an dem Tag „im Spiel" sind, laufen nach dem Ausbruch aus den ersten
 Handelsminuten oft in dieselbe Richtung weiter.
@@ -120,6 +125,21 @@ Strom): 401 Meldungen in der Handelszeit, 232 bewertet, 6 als handelbar eingestu
 keiner bestätigte der Kurs die Richtung, 0 Trades. Grund: die Meldungen kamen zu spät.
 Deshalb die zweite Quelle.
 
+## Tempo: Messungen vom 17.11.2026
+
+Josh will deutlich schneller nach einer Meldung handeln. Was gemessen ist:
+
+- **PR Newswire (RSS):** Der Feed selbst hängt 1,5 bis 3,5 Minuten hinter der Veröffentlichung
+  (Median 2,5 Minuten bei Abfrage alle 5 Sekunden, 21 Meldungen). Häufiger abfragen hilft nicht.
+- **SEC (Pflichtmitteilungen 8-K, kostenloser Feed):** sichtbar 30 bis 40 Sekunden nach Annahme
+  (2 Meldungen). Die Pflichtmitteilung folgt aber oft erst auf die Pressemitteilung.
+- **Wann die Meldungen kommen:** Von 380 Pflichtmitteilungen am 16.11. gingen 30 während der
+  Handelszeit ein, 151 davor und 199 danach. Der Bot handelt nur in der regulären Handelszeit.
+- **Schnelle Quellen kosten Geld:** RTPR (alle vier großen Verteiler, laut Anbieter unter
+  0,5 Sekunden, 139 $/Monat nach 7 Tagen Test); WireAlpha (laut Anbieter kostenlos, ungeprüft).
+- Jede zugeordnete Pressemitteilung wird ab 18.11. mit Veröffentlichungszeit protokolliert
+  (`wire_item`), damit sich später im Sekundentakt nachmessen lässt, wie schnell der Kurs reagiert.
+
 ## Bekannte Schwächen des Tests
 
 - **Papertrading füllt Orders zu günstig aus.** Echte Kursrutscher bei Nachrichten bildet
@@ -151,3 +171,5 @@ Deshalb die zweite Quelle.
   Börsenschluss mit Kursen des gesamten Marktes gemessen statt laufend mit IEX-Kursen;
   Rückrechnung kann mit Kursen des gesamten Marktes rechnen. Kritische Bewertung mit elf
   offenen Vorschlägen in `reports/2026-11-17-kritische-bewertung.md`.
+- 2026-11-17 (Entscheidung Josh, aktiv ab 18.11.): Ausbruchs-Strategie abgeschaltet.
+  Pressemitteilungen werden mit Veröffentlichungszeit protokolliert (`wire_item`).

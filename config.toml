@@ -60,7 +60,9 @@ target_r = 3.0
 max_hold_min = 90
 
 [orb]
-enabled                  = true
+# Abgeschaltet am 17.11.2026 (Entscheidung Josh): In der Rückrechnung verliert die kurze Form
+# schon vor Kosten. Damit werden auch Meldungen außerhalb der Handelszeit nicht mehr bewertet.
+enabled                  = false
 range_min                = 5     # Länge der Eröffnungsspanne in Minuten (5, 10, 15 oder 30)
 min_price                = 10.0
 min_gap_pct              = 1.0   # Mindest-Kurslücke zur Eröffnung (gilt nicht für News-Kandidaten)
