@@ -1,0 +1,6 @@
+{"t": "2026-11-17T10:38:17Z", "kind": "orphan", "symbol": "AAPL", "qty": "34", "action": "closed"}
+{"t": "2026-11-17T10:38:19Z", "kind": "orphan", "symbol": "AMZN", "qty": "18", "action": "closed"}
+{"t": "2026-11-17T10:38:20Z", "kind": "orphan", "symbol": "MSFT", "qty": "6", "action": "closed"}
+{"t": "2026-11-17T10:38:21Z", "kind": "orphan", "symbol": "NVDA", "qty": "24", "action": "closed"}
+{"t": "2026-11-17T10:38:23Z", "kind": "orphan", "symbol": "V", "qty": "15", "action": "closed"}
+{"t": "2026-11-17T10:38:24Z", "kind": "day_start", "day": "2026-11-17", "trading_day": true, "universe": 12676, "equity": 102481.39, "llm": true, "news": true, "orb": true}
