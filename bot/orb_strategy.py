@@ -5,9 +5,10 @@ pre-market news). Once the opening range is complete, the pool is ranked by rela
 and the best names are watched for a breakout out of that range.
 """
 import asyncio
-from datetime import timedelta
+import json
+from datetime import datetime, timedelta
 
-from .common import ET, iso, now, parse_ts
+from .common import DATA, ET, iso, now, parse_ts
 
 
 def opening_range(bars, open_dt, minutes):
@@ -70,17 +71,36 @@ def assess(rng, gap_pct, rvol, cfg, is_news=False):
 
 
 class OrbStrategy:
-    def __init__(self, api, cfg, journal, session, universe, executor):
+    def __init__(self, api, cfg, journal, session, universe, executor, root=None):
         self.api, self.journal, self.session = api, journal, session
         self.universe, self.executor = universe, executor
         self.cfg = cfg["orb"]
+        self.pool_file = (root or DATA) / "state" / "orb_news_pool.json"
+        self.pool = self._load_news_pool()
         self.reset_day()
+
+    def _load_news_pool(self):
+        """News candidates survive a restart (they are collected over many hours)."""
+        try:
+            raw = json.loads(self.pool_file.read_text())
+            return {s: {**i, "added": datetime.fromisoformat(i["added"])} for s, i in raw.items()}
+        except (OSError, ValueError, KeyError, TypeError):
+            return {}
+
+    def _save_news_pool(self):
+        try:
+            self.pool_file.parent.mkdir(parents=True, exist_ok=True)
+            news = {s: {**i, "added": i["added"].isoformat()} for s, i in self.pool.items() if i.get("source") == "news"}
+            self.pool_file.write_text(json.dumps(news))
+        except OSError:
+            pass
 
     def reset_day(self):
         # News candidates collected since yesterday's close stay; everything else is rebuilt.
         keep_after = now() - timedelta(hours=self.cfg["news_candidate_max_age_h"])
         old = getattr(self, "pool", {})
         self.pool = {s: i for s, i in old.items() if i.get("source") == "news" and i["added"] >= keep_after}
+        self._save_news_pool()
         self.ranges = {}      # symbol -> opening range, gap, rvol (the watched candidates)
         self.fired = set()
         self.stage = "idle"   # idle -> pooled -> ranged -> done
@@ -88,6 +108,8 @@ class OrbStrategy:
     def add_candidate(self, symbol, **info):
         if info.get("source") == "news" or symbol not in self.pool:
             self.pool[symbol] = {**info, "added": now()}
+            if info.get("source") == "news":
+                self._save_news_pool()
 
     def entry_deadline(self):
         h, m = map(int, self.cfg["entry_until"].split(":"))

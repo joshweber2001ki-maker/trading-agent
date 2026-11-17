@@ -17,9 +17,12 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/orb_strategy.py` | Ausbruch aus der Eröffnungsspanne bei Aktien mit hohem relativem Volumen |
 | `bot/executor.py` | Positionsgröße, Risikogrenzen, Order mit Stop und Ziel, Zeitlimit, Glattstellen |
 | `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API |
+| `bot/wires.py` | zweite Nachrichtenquelle: Pressemitteilungen von PR Newswire, Firmenname → Börsenkürzel |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
 | `tools/check.py` | Verbindungstest |
 | `tools/weekly_stats.py` | Wochenstatistik aus den Protokollen |
+| `tools/backtest_orb.py` | grobe Rückrechnung der Ausbruchs-Strategie (braucht Alpaca-Schlüssel) |
+| `tools/replay_news.py` | einen vergangenen Tag durch die News-Strategie spielen (braucht beide Schlüssel) |
 | `deploy/` | Installation, Dienste, stündlicher Abgleich mit GitHub |
 | `memory/strategy.md` | die Strategie in Worten, mit Begründung der Startwerte |
 | `logs/` | Protokolle des Servers (werden stündlich vom Server hochgeladen) |
@@ -36,6 +39,9 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
   Einfluss auf die Strategie sind in Ordnung.
 - **`logs/` schreibt nur der Server.** Nicht von Hand ändern, sonst gibt es Konflikte.
 - **Vor jedem Push:** `python -m pytest tests -q`.
+- **Nie eine zweite Instanz des Bots mit denselben Alpaca-Schlüsseln starten**, auch nicht zum
+  Testen: Alpaca erlaubt nur eine Verbindung zum Nachrichtenstrom, und eine zweite Instanz
+  würde Positionen der ersten als fremd ansehen und schließen.
 - **Auslieferung:** Push auf `main` genügt. Der Server holt Änderungen stündlich
   (`deploy/sync.sh`) und startet den Bot nur außerhalb der US-Handelszeit neu.
 - **Notbremse:** Datei `/var/lib/trading-bot/HALT` auf dem Server anlegen = keine neuen

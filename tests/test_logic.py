@@ -103,8 +103,8 @@ def test_relative_volume():
     assert relative_volume(30_000, [1] * 5 + [10_000] * 10) == pytest.approx(3.0)   # only the last 10 days count
 
 
-def test_orb_keeps_only_fresh_news_candidates_overnight():
-    orb = OrbStrategy(None, CFG, None, None, None, None)
+def test_orb_keeps_only_fresh_news_candidates_overnight(tmp_path):
+    orb = OrbStrategy(None, CFG, None, None, None, None, root=tmp_path)
     orb.add_candidate("NVDA", source="static")
     orb.add_candidate("HD", source="news", verdict={"surprise": 8})
     orb.add_candidate("OLD", source="news", verdict={"surprise": 9})
@@ -113,6 +113,8 @@ def test_orb_keeps_only_fresh_news_candidates_overnight():
     assert orb.pool["HD"]["source"] == "news"
     orb.reset_day()
     assert list(orb.pool) == ["HD"] and orb.stage == "idle"
+    again = OrbStrategy(None, CFG, None, None, None, None, root=tmp_path)      # restart: news candidates are still there
+    assert list(again.pool) == ["HD"] and again.pool["HD"]["verdict"]["surprise"] == 8
 
 
 def test_company_name_matching():
