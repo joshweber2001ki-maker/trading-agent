@@ -1,0 +1,28 @@
+[Unit]
+Description=Trading bot (Alpaca paper trading)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/trading-bot/alpaca.env
+
+[Service]
+User=trader
+WorkingDirectory=/opt/trading-agent
+EnvironmentFile=/etc/trading-bot/alpaca.env
+EnvironmentFile=-/etc/trading-bot/llm.env
+Environment=BOT_DATA_DIR=/var/lib/trading-bot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/trading-agent/.venv/bin/python -m bot.main
+Restart=always
+RestartSec=10
+
+# Keep the bot from disturbing anything else on this server.
+MemoryMax=400M
+CPUQuota=50%
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/trading-bot
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,27 +1,51 @@
-# Trading Agent
+# Trading-Bot (Alpaca Paper-Trading)
 
-Stand: 2026-11-17 — Strategie zurückgesetzt. Es ist aktuell **keine Strategie definiert**.
+Stand: 2026-11-17. Zweck: zwei kurzfristige Strategien mit großen Positionen im
+**Paper-Konto** testen. Echtgeld ist nicht vorgesehen; `bot/main.py` verweigert den Start,
+wenn `APCA_BASE_URL` nicht auf das Paper-Konto zeigt.
 
-Solange hier keine neue Strategie steht, werden **keine Orders platziert**. Lesezugriffe
-auf Konto und Marktdaten sind in Ordnung.
+## Aufbau
 
-## Was vorhanden ist
+Ein dauerhaft laufendes Python-Programm (`python -m bot.main`) auf Joshs Hostinger-VPS
+(`srv1141361`, Dienst `trading-bot`). Kein KI-Agent entscheidet im Handel selbst: die KI
+bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 
-- `scripts/alpaca.py` — alle Alpaca-Aufrufe (Konto, Positionen, Kurse, Orders); Paper-Trading
-- `scripts/guardrails.py` — Sicherheitsprüfungen vor Orders. Die Limits darin stammen noch
-  aus der alten Strategie und werden mit der neuen Strategie neu festgelegt.
-- `memory/strategy.md` — leer, Platz für die neue Strategie
-- `memory/watchlist.json` — leer
-- `memory/stops.json` — leer
-- `journal/` — leer
+| Datei | Aufgabe |
+|---|---|
+| `config.toml` | alle Stellschrauben beider Strategien und der Risikogrenzen |
+| `bot/news_strategy.py` | Meldung → KI-Bewertung → Bestätigung durch Kurs und Volumen → Einstieg |
+| `bot/orb_strategy.py` | Ausbruch aus der Eröffnungsspanne bei Aktien mit hohem relativem Volumen |
+| `bot/executor.py` | Positionsgröße, Risikogrenzen, Order mit Stop und Ziel, Zeitlimit, Glattstellen |
+| `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API |
+| `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
+| `tools/check.py` | Verbindungstest |
+| `tools/weekly_stats.py` | Wochenstatistik aus den Protokollen |
+| `deploy/` | Installation, Dienste, stündlicher Abgleich mit GitHub |
+| `memory/strategy.md` | die Strategie in Worten, mit Begründung der Startwerte |
+| `logs/` | Protokolle des Servers (werden stündlich vom Server hochgeladen) |
+| `reports/` | Wochenrückblicke |
+| `archive/aria-v1/` | altes Setup „ARIA" (April–Mai 2026), nur zum Nachlesen |
 
-## Zugangsdaten
+## Regeln für die Arbeit an diesem Repo
 
-Die Skripte lesen `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY` und `APCA_BASE_URL` aus der
-Umgebung. Keys gehören nie ins Repo.
+- **Keine Zugangsdaten ins Repo.** Sie liegen nur auf dem Server unter `/etc/trading-bot/`
+  (eintragen mit `deploy/set-keys.sh`). In der Git-Historie stehen noch alte, öffentliche
+  Paper-Keys; sie gelten als kompromittiert.
+- **Strategieänderungen erst vorschlagen, dann umsetzen.** Josh will Änderungen an
+  `config.toml` oder an der Handelslogik vorher sehen und freigeben. Fehlerbehebungen ohne
+  Einfluss auf die Strategie sind in Ordnung.
+- **`logs/` schreibt nur der Server.** Nicht von Hand ändern, sonst gibt es Konflikte.
+- **Vor jedem Push:** `python -m pytest tests -q`.
+- **Auslieferung:** Push auf `main` genügt. Der Server holt Änderungen stündlich
+  (`deploy/sync.sh`) und startet den Bot nur außerhalb der US-Handelszeit neu.
+- **Notbremse:** Datei `/var/lib/trading-bot/HALT` auf dem Server anlegen = keine neuen
+  Einstiege. `systemctl stop trading-bot` beendet den Bot; offene Positionen sind über Stop-
+  und Zielorders beim Broker abgesichert.
 
-## Archiv
+## Protokolle lesen
 
-Die frühere Strategie „ARIA" (April–Mai 2026) liegt vollständig unter `archive/aria-v1/`:
-Regeln, Strategie-Notizen, Verlauf, Watchlist, Stops, Routinen und Journale. Sie ist
-nicht mehr gültig und dient nur zum Nachlesen.
+- `logs/status.json` – Lebenszeichen des Bots (jede Minute neu, stündlich hochgeladen)
+- `logs/trades.jsonl` – ein Eintrag je abgeschlossenem Trade
+- `logs/events-JJJJ-MM-TT.jsonl` – alle Entscheidungen: bewertete Meldungen, abgelehnte
+  Signale mit Grund, Fehler
+- `logs/daily/JJJJ-MM-TT.json` – Tagesabschluss

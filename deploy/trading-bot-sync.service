@@ -1,0 +1,6 @@
+[Unit]
+Description=Trading bot: publish logs to GitHub and pick up code changes
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/trading-agent/deploy/sync.sh

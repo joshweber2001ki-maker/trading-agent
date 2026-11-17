@@ -1,0 +1,69 @@
+# Trading-Bot — Konfiguration
+# Alle Stellschrauben der Strategie stehen hier. Zugangsdaten stehen NICHT hier,
+# sondern in der Umgebung (siehe .env.example).
+
+[risk]
+risk_per_trade_pct     = 0.5    # Anteil des Depots, der pro Trade bis zum Stop riskiert wird
+max_position_leverage  = 1.0    # größte Einzelposition als Vielfaches des Depots
+max_gross_leverage     = 3.0    # Summe aller Positionen als Vielfaches des Depots
+max_open_positions     = 4
+max_trades_per_day     = 20
+daily_loss_limit_pct   = 2.0    # ab diesem Tagesverlust keine neuen Einstiege mehr
+min_price              = 5.0    # keine Aktien unter diesem Kurs
+
+[execution]
+entry_limit_offset_pct   = 0.15  # Einstiegslimit so weit über/unter dem letzten Kurs
+entry_timeout_s          = 20    # nicht ausgeführte Einstiege nach dieser Zeit streichen
+flatten_before_close_min = 10    # so viele Minuten vor Börsenschluss alles glattstellen
+poll_s                   = 5     # Prüfintervall für offene Trades
+
+[news]
+enabled                  = true
+max_article_age_s        = 90    # ältere Meldungen werden nicht mehr gehandelt
+max_symbols              = 3     # Meldungen mit mehr Aktien sind Sammelartikel
+min_surprise             = 7     # KI-Bewertung 0-10: wie überraschend
+min_confidence           = 6     # KI-Bewertung 0-10: wie sicher die Richtung
+confirm_window_s         = 300   # so lange auf Bestätigung durch den Kurs warten
+min_move_pct             = 0.4   # Kurs muss mindestens so weit in die Richtung gelaufen sein
+max_chase_pct            = 3.0   # ist er schon weiter gelaufen, wird nicht hinterhergekauft
+volume_mult              = 2.0   # Minutenvolumen gegenüber dem Schnitt der letzten 30 Minuten
+max_spread_pct           = 0.3   # größere Geld-/Brief-Spanne = zu illiquide
+stop_range_mult          = 0.75  # Stop-Abstand = Faktor x Kursspanne der letzten 10 Minuten
+stop_min_pct             = 0.4
+stop_max_pct             = 1.5
+target_r                 = 2.0   # Kursziel als Vielfaches des Stop-Abstands
+max_hold_min             = 30    # Zeitlimit pro Trade
+symbol_cooldown_min      = 60    # nach einem Trade Pause für dieselbe Aktie
+start_after_open_min     = 5
+no_entry_before_close_min = 30
+
+[orb]
+enabled                  = true
+range_min                = 5     # Länge der Eröffnungsspanne in Minuten (5, 10, 15 oder 30)
+min_price                = 10.0
+min_gap_pct              = 1.0   # Mindest-Kurslücke zur Eröffnung (gilt nicht für News-Kandidaten)
+max_gap_pct              = 30.0  # darüber ist es meist ein Datenfehler oder eine Sondersituation
+min_rvol                 = 1.0   # Volumen der Spanne gegenüber dem Schnitt der letzten 10 Tage
+min_range_dollar_volume  = 1000000  # Mindestumsatz in der Spanne (auf dem IEX-Datenfeed)
+min_range_pct            = 0.2   # zu enge Spanne = Zufallsausbruch
+max_range_pct            = 2.5   # zu weite Spanne = Bewegung ist schon gelaufen
+max_candidates           = 8     # die mit dem höchsten relativen Volumen werden beobachtet
+exclude_funds            = true  # keine ETFs und Hebelprodukte
+breakout_buffer_pct      = 0.05
+stop_range_frac          = 0.5   # Stop-Abstand = Faktor x Breite der Spanne
+stop_min_pct             = 0.3
+stop_max_pct             = 1.0
+target_r                 = 2.0
+max_hold_min             = 90    # Zeitlimit pro Trade
+entry_until              = "11:00"  # New Yorker Zeit, danach keine neuen Ausbrüche
+premarket_news_from      = "06:00"  # ab dann werden vorbörsliche Meldungen bewertet (New Yorker Zeit)
+premarket_news_min_surprise = 6
+# Liquide, schwankungsfreudige Aktien, die immer mit geprüft werden
+static_pool = ["NVDA", "TSLA", "AMD", "META", "AMZN", "AAPL", "MSFT", "PLTR", "COIN", "AVGO", "NFLX", "SMCI", "MU", "GOOGL", "INTC", "MSTR", "HOOD", "UBER", "BA", "JPM"]
+
+[llm]
+model              = "claude-haiku-5-5"
+thinking           = false   # true = gründlicher, aber mehrere Sekunden langsamer und teurer
+max_calls_per_hour = 80
+max_calls_per_day  = 500
+timeout_s          = 20
