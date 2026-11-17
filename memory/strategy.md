@@ -155,6 +155,46 @@ Sofort-Einstieg und Handel außerhalb der regulären Zeit ausarbeiten (Josh gibt
 23.11., den 7-Tage-Test von RTPR starten, falls die Messung dafür spricht, und an Tag 6 kündigen,
 wenn die Zahlen es nicht tragen.
 
+## Erste Ergebnisse der Tempo-Messung (Lauf vom 17.11.2026, 22:25 Uhr deutscher Zeit)
+
+Gemessen wurden 644 Meldungen (604 Pflichtmitteilungen an die SEC seit dem 13.11., 40
+Pressemitteilungen vom 17.11.), ohne Fehler, in 17 Minuten. 237 davon betrafen Aktien, die in
+den zehn Minuten vor der Meldung gar nicht gehandelt wurden; sie zählen nicht mit.
+
+- Von den übrigen 407 Meldungen bewegte sich der Kurs bei 108 binnen fünf Minuten um
+  mindestens 1 %. In diesen fünf Minuten wurden im Median aber nur 6.200 $ gehandelt. Die
+  meisten dieser Ausschläge sind also dünner Handel vor oder nach der Börse, in den keine
+  Position passt.
+- Mit mindestens 100.000 $ Umsatz in fünf Minuten bleiben 25 Meldungen in drei Tagen:
+  17 vorbörslich, 8 nachbörslich, keine in der Handelszeit. Bei ihnen (Mediane): Bewegung
+  nach fünf Minuten 1,7 %; davon noch zu holen bei Einstieg nach 2 s / 10 s / 60 s / 120 s:
+  2,0 / 2,0 / 1,7 / 1,25 Prozentpunkte; Stand nach 30 Minuten 1,8 %; Umsatz in den ersten
+  zehn Sekunden: 0 $.
+- In der Handelszeit: 50 Meldungen, 10 mit Bewegung, keine mit genug Umsatz; die Bewegung
+  war dort nach zwei Minuten vorbei.
+- Beispiele: Disney (Quartalszahlen, 12:30 Uhr deutscher Zeit, vorbörslich): nach 10 s noch
+  unverändert, nach 60 s +2,9 %, nach 5 min +4,7 %, nach 30 min +3,6 %; 5,6 Mio. $ Umsatz in
+  5 min. Nike (15:01 Uhr): nach 10 s +1,0 %, nach 60 s +2,4 %, nach 5 min +3,1 %, nach
+  30 min +3,9 %; 21 Mio. $.
+
+Vorläufige Lesart, drei Tage und fast nur SEC-Meldungen:
+
+1. Kursreaktionen mit genug Umsatz gibt es vor der Eröffnung und nach Börsenschluss, also
+   genau dann, wenn der Bot bisher nicht handelt.
+2. In den ersten zehn Sekunden wird kaum gehandelt. Es zählt, binnen etwa einer Minute da zu
+   sein; ein Vorsprung von Sekundenbruchteilen bringt bei diesen Meldungen wenig.
+3. Die Zahlen sind Obergrenzen: Die Richtung gilt als bekannt, die Geld-/Brief-Spanne ist
+   nicht gemessen (vor- und nachbörslich ist sie weit), und für dünn gehandelte Aktien fehlt
+   der Vergleich mit Zeiten ohne Meldung. Eine Pflichtmitteilung kann außerdem später kommen
+   als die Pressemitteilung zum selben Ereignis.
+
+Bewertung gegen Kursverlauf am 17.11. (Haiku, 249 Meldungen in der Handelszeit, Kurse des
+gesamten Marktes): Bei den 43 Meldungen mit Richtung lief der Kurs in den 30 Minuten nach
+Eingang im Schnitt 0,07 % in die vorhergesagte Richtung (Richtung richtig bei 60 %); bei den 8
+handelbar eingestuften 0,27 % (5 von 8 richtig). Der Betrag der Bewegung nach 30 Minuten lag
+je Wirkungs-Stufe bei 0,3 bis 0,55 %, weit unter dem, was die Stufen bedeuten sollen (1–3 %,
+3–8 %). Die Meldungen erreichen den Bot erst, wenn die Bewegung vorbei ist.
+
 ## Modelltest 18.–20.11.2026: Opus entscheidet, Haiku und Sonnet laufen mit
 
 Entscheidung Josh vom 17.11.2026: Für den Rest der Woche bewertet Claude Opus 5.5 die Meldungen,

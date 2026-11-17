@@ -831,7 +831,13 @@ def test_speed_statistics_show_what_is_left_for_a_late_entry():
     assert (s["n"], s["thin"], s["skipped"], s["movers"], s["move_300"]) == (3, 1, 1, 2, 3.0)
     assert (s["left_after_2s"], s["left_after_10s"], s["left_after_60s"], s["left_after_120s"]) == (2.0, 1.5, 0.5, 0.2)
     assert s["before_publication"] == 0.4 and s["after_30min"] == 2.5 and s["usd_first_10s"] == 5000
-    assert speed_stats([])["n"] == 0
+    assert s["liquid"]["movers"] == 0                              # 5,000 $ and 2,000 $ in five minutes: nothing to trade in
+    # the same two movers with real volume: one by its dollars, one so busy that the trade list was cut off
+    rows[0].update(usd_60_300=400000)
+    rows[1].update(truncated=True)
+    liquid = speed_stats(rows)["liquid"]
+    assert (liquid["movers"], liquid["move_300"], liquid["left_after_60s"], liquid["usd_5min"]) == (2, 3.0, 0.5, 405000)
+    assert speed_stats([])["n"] == 0 and speed_stats([])["liquid"]["movers"] == 0
 
 
 # ── which model rates, and the models that rate along ────────────────────────

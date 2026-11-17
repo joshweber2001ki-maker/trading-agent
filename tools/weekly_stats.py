@@ -130,34 +130,50 @@ def outcome_stats(rows):
 
 MOVER_PCT = 1.0     # an announcement counts as a mover if the price is at least this far away after 5 minutes
 FRESH_REF_S = 600   # the stock must have traded within this many seconds before the announcement
+LIQUID_USD = 100_000  # traded in the 5 minutes after the announcement; below that, a position of 25,000 $ is not realistic
 SESSIONS = {"pre": "vorbörslich", "regular": "Handelszeit", "post": "nachbörslich"}
+
+
+def usd_300(r):
+    """Dollars traded in the 5 minutes after the announcement. A stock so busy that the trade
+    list was cut off counts as far above any threshold."""
+    if r.get("truncated"):
+        return float("inf")
+    return sum(r.get(k) or 0 for k in ("usd_0_2", "usd_2_10", "usd_10_60", "usd_60_300"))
 
 
 def speed_stats(rows):
     """How much of the move after an announcement is left for someone who gets in later.
 
     Looks only at announcements after which the price had moved by MOVER_PCT within 5 minutes,
-    and assumes the direction is known. That makes every number an upper bound.
+    and assumes the direction is known. That makes every number an upper bound. Most of these
+    moves happen in thin trading before the open or after the close, so the same numbers are
+    given again for the movers with at least LIQUID_USD traded in those 5 minutes.
     """
     def med(xs):
         xs = sorted(x for x in xs if x is not None)
         return round(xs[len(xs) // 2], 2) if xs else None
+
+    sign = lambda r: 1 if r["r300"] > 0 else -1
+
+    def core(movers):
+        out = {"movers": len(movers),
+               "move_300": med(abs(r["r300"]) for r in movers),
+               "before_publication": med(r["pre_move"] * sign(r) for r in movers if r.get("pre_move") is not None),
+               "after_30min": med(r["r1800"] * sign(r) for r in movers if r.get("r1800") is not None),
+               "usd_first_10s": med((r.get("usd_0_2") or 0) + (r.get("usd_2_10") or 0) for r in movers),
+               "usd_5min": med(usd_300(r) for r in movers if not r.get("truncated"))}
+        for h in (2, 10, 60, 120):
+            out[f"left_after_{h}s"] = med((r["r300"] - r[f"r{h}"]) * sign(r) for r in movers if r.get(f"r{h}") is not None)
+        return out
 
     measured = [r for r in rows if not r.get("skipped") and r.get("r300") is not None]
     # Only stocks that were trading right before the announcement: with a reference price that is
     # hours old, the first trade afterwards is a gap, not a move anyone could have followed.
     ok = [r for r in measured if (r.get("ref_age_s") or 0) <= FRESH_REF_S]
     movers = [r for r in ok if abs(r["r300"]) >= MOVER_PCT]
-    sign = lambda r: 1 if r["r300"] > 0 else -1
-    out = {"n": len(ok), "thin": len(measured) - len(ok), "skipped": sum(1 for r in rows if r.get("skipped")),
-           "movers": len(movers),
-           "move_300": med(abs(r["r300"]) for r in movers),
-           "before_publication": med(r["pre_move"] * sign(r) for r in movers if r.get("pre_move") is not None),
-           "after_30min": med(r["r1800"] * sign(r) for r in movers if r.get("r1800") is not None),
-           "usd_first_10s": med((r.get("usd_0_2") or 0) + (r.get("usd_2_10") or 0) for r in movers)}
-    for h in (2, 10, 60, 120):
-        out[f"left_after_{h}s"] = med((r["r300"] - r[f"r{h}"]) * sign(r) for r in movers if r.get(f"r{h}") is not None)
-    return out
+    return {"n": len(ok), "thin": len(measured) - len(ok), "skipped": sum(1 for r in rows if r.get("skipped")),
+            **core(movers), "liquid": core([r for r in movers if usd_300(r) >= LIQUID_USD])}
 
 
 # List prices in $ per million tokens (input, output), as of 2026-11-17.
@@ -428,11 +444,16 @@ def markdown(r):
             return "keine Daten" + thin
         if not o["movers"]:
             return f'{o["n"]} Meldungen gemessen{thin}, keine mit mindestens {MOVER_PCT:g} % Bewegung in 5 Minuten'
-        return (f'{o["n"]} Meldungen gemessen{thin}, {o["movers"]} mit mindestens {MOVER_PCT:g} % Bewegung in 5 Minuten. Bei diesen: '
-                f'Bewegung nach 5 min {o["move_300"]} %; davon noch zu holen bei Einstieg nach 2 s / 10 s / 60 s / 120 s = '
-                f'{o["left_after_2s"]} / {o["left_after_10s"]} / {o["left_after_60s"]} / {o["left_after_120s"]} Prozentpunkte; '
-                f'schon vor der Veröffentlichung gelaufen {o["before_publication"]} %; Stand nach 30 min {o["after_30min"]} %; '
-                f'Umsatz in den ersten 10 s {o["usd_first_10s"]} $')
+        def path(x):
+            return (f'Bewegung nach 5 min {x["move_300"]} %; davon noch zu holen bei Einstieg nach 2 s / 10 s / 60 s / 120 s = '
+                    f'{x["left_after_2s"]} / {x["left_after_10s"]} / {x["left_after_60s"]} / {x["left_after_120s"]} Prozentpunkte; '
+                    f'schon vor der Veröffentlichung gelaufen {x["before_publication"]} %; Stand nach 30 min {x["after_30min"]} %; '
+                    f'Umsatz in den ersten 10 s {x["usd_first_10s"]} $, in 5 min {x["usd_5min"]} $')
+        liq = o["liquid"]
+        liquid = (f' Davon mit mindestens {LIQUID_USD:,} $ Umsatz in 5 Minuten (nur dort passt eine Position hinein): '.replace(",", ".")
+                  + (f'{liq["movers"]} Meldungen. Bei diesen: {path(liq)}' if liq["movers"] else "keine"))
+        return (f'{o["n"]} Meldungen gemessen{thin}, {o["movers"]} mit mindestens {MOVER_PCT:g} % Bewegung in 5 Minuten. '
+                f'Bei diesen: {path(o)}.{liquid}')
 
     sp = r["speed"]
     out += ["", "## Tempo: Kursverlauf im Sekundentakt nach Pressemitteilungen und SEC-Meldungen",
