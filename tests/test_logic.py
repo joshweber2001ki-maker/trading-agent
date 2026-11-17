@@ -986,6 +986,59 @@ def test_fallback_model_decides_only_when_the_main_model_fails(tmp_path):
     assert plan is None and ev["news_skipped"] and ev["news_shadow"][0]["error"].startswith("llm_network")
 
 
+def test_weekly_stats_compare_the_models_on_the_same_articles(tmp_path):
+    logs = tmp_path / "logs"
+    logs.mkdir(parents=True)
+    (tmp_path / "config.toml").write_text("[news]\nmin_surprise = 7\nmin_confidence = 6\nmin_impact = 1\n")
+    O, H, S = "claude-opus-5-5", "claude-haiku-5-5", "claude-sonnet-5-5"
+    v = lambda d, s=8, i=2, c=7: {"symbol": "ACME", "direction": d, "surprise": s, "impact": i, "confidence": c}
+    ev = []
+
+    def rated(article, model, verdict, kind="news_shadow", tokens=(1000, 200), secs=3.0, **kw):
+        ev.append({"t": "2026-11-18T15:00:00Z", "kind": kind, "article": article, "headline": "Headline " + article,
+                   "phase": "live", "model": model, "symbol": verdict["symbol"] if verdict else None, "verdict": verdict,
+                   "model_s": secs, "tokens_in": tokens[0], "tokens_out": tokens[1], **kw})
+
+    for article, opus, haiku, sonnet, ret in (("a1", v("none", 0, 0), v("up"), v("up"), -1.5),      # two false alarms
+                                              ("a2", v("up"), v("up", 7, 1, 6), v("none", 3, 0), 2.0),
+                                              ("a3", v("none", 0, 0), v("none", 0, 0), v("none", 0, 0), 0.1)):
+        rated(article, O, opus, "news_classified")
+        rated(article, H, haiku, tokens=(1000, 90), secs=0.9)
+        rated(article, S, sonnet, tokens=(1000, 100), secs=1.5)
+        ev.append({"t": "2026-11-18T21:20:00Z", "kind": "news_outcome", "article": article, "symbol": "ACME",
+                   "direction": opus["direction"], "ret_5": ret / 2, "ret_15": ret, "ret_30": ret, "ret_60": ret,
+                   "max_up": abs(ret), "max_down": -abs(ret)})
+    # Opus did not answer: Haiku's rating decided. Not an article that all models rated.
+    ev.append({"t": "2026-11-18T15:05:00Z", "kind": "news_fallback", "article": "a4", "failed": O, "used": H, "error": "llm_http_529"})
+    rated("a4", H, v("up"), "news_classified", tokens=(1000, 90), secs=0.9)
+    rated("a4", H, v("up"), tokens=(1000, 90), secs=0.9)
+    rated("a4", S, v("up"), tokens=(1000, 100), secs=1.5)
+    # Sonnet failed on one: again not rated by all.
+    rated("a5", O, v("none", 0, 0), "news_classified")
+    rated("a5", H, v("none", 0, 0), tokens=(1000, 90), secs=0.9)
+    rated("a5", S, None, tokens=(None, None), secs=20.0, error="llm_network: timeout")
+    # a line from before the switch (no model named) is left out
+    ev.append({"t": "2026-11-17T15:00:00Z", "kind": "news_classified", "article": "old", "phase": "live", "symbol": "ACME",
+               "verdict": v("up"), "llm_s": 2.0})
+    (logs / "events-2026-11-18.jsonl").write_text("\n".join(json.dumps(e) for e in ev))
+    m = build(tmp_path, *week_of(datetime(2026, 11, 18).date()))["models"]
+    assert list(m["models"]) == [O, H, S] and m["common"] == 3 and m["movers"] == 2 and m["differences"] == 2
+    opus, haiku, sonnet = (m["models"][k] for k in (O, H, S))
+    assert (opus["decided"], opus["ratings"], opus["failed"]) == (4, 4, 1)
+    assert (haiku["decided"], haiku["ratings"], haiku["failed"]) == (1, 6, 0) and sonnet["failed"] == 1
+    assert (opus["candidates"], haiku["candidates"], sonnet["candidates"]) == (1, 2, 1)
+    assert (opus["movers_caught"], haiku["movers_caught"], sonnet["movers_caught"]) == (1, 1, 0)
+    assert opus["candidates_vs_price"]["hit_rate_30_pct"] == 100.0 and haiku["candidates_vs_price"]["hit_rate_30_pct"] == 50.0
+    assert sonnet["candidates_vs_price"]["dir_move_30"] == -1.5
+    assert (opus["seconds_median"], haiku["seconds_median"], opus["tokens_out"]) == (3.0, 0.9, 200)
+    assert opus["cents_per_rating"] == 0.8 and opus["cost"] == 0.03
+    assert haiku["cents_per_rating"] == pytest.approx(0.0145, abs=0.001)      # 1000 x 0.10 $ + 90 x 0.50 $ per million
+    assert [x["symbol"] for x in m["examples"]] == ["ACME", "ACME"] and m["examples"][0]["ret_30"] == 2.0
+    assert m["examples"][1]["verdicts"] == {O: "none 0/0/7", H: "up 8/2/7", S: "up 8/2/7"}
+    md = markdown(build(tmp_path, *week_of(datetime(2026, 11, 18).date())))
+    assert "## Modellvergleich" in md and "uneinig bei 2 Meldungen" in md and f"{O} 1, {H} 2, {S} 1" in md
+
+
 # ── the whole program against a simulated broker ─────────────────────────────
 def test_bot_starts_lists_filings_and_measures_after_the_close_without_trading(tmp_path, monkeypatch):
     """Start, begin the day, list SEC filings, run both measurements after the close, write the

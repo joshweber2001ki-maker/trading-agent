@@ -134,7 +134,7 @@ shadow             = ["claude-haiku-5-5", "claude-sonnet-5-5"]
 fallback           = "claude-haiku-5-5"   # dessen Bewertung zählt, wenn das entscheidende Modell nicht antwortet (muss in shadow stehen)
 parallel           = 6       # so viele Meldungen werden gleichzeitig bewertet
 max_calls_per_hour = 300     # je Modell
-max_calls_per_day  = 600     # je Modell. Eine Bewertung kostet grob: Opus 1-3 Cent, Sonnet 0,3 Cent, Haiku 0,02 Cent
+max_calls_per_day  = 600     # je Modell. Eine Bewertung kostet rund: Opus 0,6-1 Cent, Sonnet 0,3 Cent, Haiku 0,015 Cent
 timeout_s          = 20
 
 # Wie gründlich ein Modell vor der Antwort nachdenkt: "off" = gar nicht (am schnellsten), sonst

@@ -132,6 +132,10 @@ Paper-Ergebnisse sind eine Obergrenze.
 - **V12 umgesetzt (17.11.):** Die Tempo-Messung läuft ab dem Abend des 17.11. (`news_speed`,
   Abschnitt „Tempo" der Wochenstatistik). Josh hat den Ablauf freigegeben: diese Woche messen,
   am Montag, 23.11., den RTPR-Test starten (V14), falls die Messung dafür spricht.
+- **V16 entschieden (17.11., Wunsch von Josh):** Vom 18. bis 20.11. bewertet Opus 5.5 statt
+  Haiku 5.5 und entscheidet; Haiku und Sonnet 5.5 bewerten jede Meldung zum Vergleich mit.
+  Auswertung im Wochenrückblick (Abschnitt „Modellvergleich" der Wochenstatistik). Hintergrund
+  und Probelauf in `memory/strategy.md` unter „Modelltest".
 - Alle übrigen Vorschläge sind offen.
 
 ## Vorschläge (Entscheidung Josh)
@@ -153,6 +157,7 @@ Paper-Ergebnisse sind eine Obergrenze.
 | V12 | Tempo-Messung: zu jeder Pressemitteilung und Pflichtmitteilung den Kursverlauf im Sekundentakt aus Handelsdaten des gesamten Marktes nachmessen (kostenlos, 15 Minuten verzögert) | zeigt vor jeder Ausgabe, wie viel Bewegung nach 2 s, 10 s, 40 s und 2 min noch übrig ist | keins für den Handel; für den SEC-Feed braucht es eine Kontaktadresse in der Kennung |
 | V13 | WireAlpha (laut Anbieter kostenlos und in Echtzeit) anschließen und die Verzögerung gegen die Veröffentlichungszeit messen | einzige kostenlose Quelle, die Echtzeit verspricht | unbekannter Anbieter, Angaben ungeprüft; Josh muss ein Konto anlegen |
 | V14 | RTPR sieben Tage testen (danach 139 $/Monat, Zahlungsdaten nötig) | einziger gefundener Anbieter mit Echtzeit-Schnittstelle für Privatkunden und Testzeitraum | Kosten, wenn nicht rechtzeitig gekündigt; erst nach V12 und V15 sinnvoll |
+| V16 | Stärkeres Modell für die Bewertung: Opus 5.5 entscheidet, Haiku 5.5 und Sonnet 5.5 laufen zum Vergleich mit | zwei Fehlalarme am 17.11. durch falsche Firmenzuordnung und eine unstimmige Meldung; ohne Kursbestätigung (V15) zählt die Qualität der Bewertung mehr | etwa 3 $ pro Handelstag; Opus braucht 2 bis 4 statt 1 Sekunde je Bewertung |
 | V15 | Sofort-Einstieg nach der KI-Bewertung statt bis zu 5 Minuten auf Bestätigung zu warten; Handel auch vor und nach der regulären Handelszeit | ohne das nützt eine schnelle Quelle nichts; über 90 % der Pflichtmitteilungen kommen außerhalb der Handelszeit | Strategieänderung; außerhalb der Handelszeit weite Spannen, keine Stop-Orders beim Broker, Paper-Ergebnisse dort besonders unzuverlässig |
 
 **Abbruchkriterium für die News-Idee** (Vorschlag): Nach vier Wochen oder 30 Meldungen je

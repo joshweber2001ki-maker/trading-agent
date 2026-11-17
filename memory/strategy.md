@@ -33,7 +33,8 @@ Alle Zahlen stehen in `config.toml`; hier steht, was sie bedeuten und warum sie 
    Treffer, damit nie die falsche Aktie gehandelt wird. Abgedeckt ist nur dieser eine
    Verteiler, also ein Teil aller Unternehmensmeldungen.
 
-Jede Meldung mit höchstens drei Aktien bewertet die KI (Claude Haiku 5.5):
+Jede Meldung mit höchstens drei Aktien bewertet die KI (seit 18.11.2026 Claude Opus 5.5, davor
+Claude Haiku 5.5; siehe „Modelltest“ weiter unten):
 
 - **Richtung:** hoch, runter oder unklar
 - **Überraschung (0–10):** wie neu und unerwartet die Meldung ist
@@ -154,6 +155,56 @@ Sofort-Einstieg und Handel außerhalb der regulären Zeit ausarbeiten (Josh gibt
 23.11., den 7-Tage-Test von RTPR starten, falls die Messung dafür spricht, und an Tag 6 kündigen,
 wenn die Zahlen es nicht tragen.
 
+## Modelltest 18.–20.11.2026: Opus entscheidet, Haiku und Sonnet laufen mit
+
+Entscheidung Josh vom 17.11.2026: Für den Rest der Woche bewertet Claude Opus 5.5 die Meldungen,
+und nur seine Bewertung führt zu Trades. Haiku 5.5 (bis dahin das entscheidende Modell) und
+Sonnet 5.5 bewerten jede Meldung in der Handelszeit ebenfalls, ohne Einfluss auf den Handel
+(„Schatten“, Protokolleintrag `news_shadow`). Am Ende der Woche wird verglichen.
+
+Anlass: Am 17.11. waren zwei der Kandidaten von Haiku Fehlalarme, die an schlechten Eingangsdaten
+lagen. „EQT to acquire Flatiron Energy“ wurde dem US-Gasförderer EQT zugeordnet, gemeint war der
+schwedische Investor EQT (Alpacas Strom meldete später „EQT Transition Infrastructure to Acquire
+Flatiron Energy“, ebenfalls unter dem Kürzel EQT). „InMode Reports Q4 Earnings Miss“ passte nicht
+zur Lage: InMode hatte am 11.11. Zahlen zum dritten Quartal über der Schätzung gemeldet. Beide
+Kandidaten stoppte nur die Bestätigung durch den Kurs.
+
+Einstellungen (`config.toml`, Abschnitt `[llm]`):
+
+- Opus denkt vor jeder Antwort nach, das lässt sich bei diesem Modell nicht abschalten
+  (Stufe „medium“, die Voreinstellung des Modells). Haiku und Sonnet antworten ohne Nachdenken.
+- Antwortet Opus nicht (Fehler, Zeitüberschreitung nach 20 Sekunden), zählt die Bewertung von
+  Haiku (`news_fallback`), damit der Bot nicht blind wird.
+- Obergrenze je Modell: 300 Bewertungen pro Stunde, 600 pro Tag.
+
+Probelauf auf dem Server am 17.11. um 21:36 Uhr deutscher Zeit (`tools/llm_check.py`, drei
+Beispielmeldungen, die beiden Fehlalarme aus dem Protokoll nachgestellt, ohne den Originaltext):
+
+| Modell | Antwortzeit | Token (Eingabe + Ausgabe) | „EQT kauft Flatiron“ | „InMode verfehlt Gewinn“ |
+|---|---|---|---|---|
+| Opus 5.5 | 1,8–4,1 s | rund 970 + 90 bis 320 | unklar, 0/0: „vermutlich der schwedische Investor EQT AB, nicht EQT Corp“ | runter, Überraschung 6, Sicherheit 5: „seltsamer Zeitpunkt, möglicher Datenfehler“ – kein Kandidat |
+| Sonnet 5.5 | 1,1–1,8 s | rund 960 + 100 | unklar, 6/1: „Gasförderer kauft Batteriespeicher, ungewöhnlich“ | runter, 8/2, Sicherheit 8 – Kandidat |
+| Haiku 5.5 | 0,9 s | rund 960 + 95 | unklar, 6/1: „Richtung unklar“ | runter, 8/2, Sicherheit 8 – Kandidat |
+
+Zwei Beispiele sind kein Beleg, sie zeigen nur die Art des Unterschieds. Das Konto hat für alle
+drei Modelle 13.000 Anfragen pro Minute frei, Engpässe gibt es dort nicht.
+
+Kosten nach diesen Token-Zahlen: Opus rund 0,6 bis 1 Cent je Bewertung, Sonnet 0,3 Cent, Haiku
+0,015 Cent. Bei rund 270 Bewertungen pro Handelstag (Stand 17.11.) sind das zusammen etwa
+2,50 bis 3,50 $ pro Tag. Die echten Werte stehen ab dem 18.11. im Protokoll (`tokens_in`,
+`tokens_out`) und im Abschnitt „Modellvergleich“ der Wochenstatistik.
+
+Was der Vergleich am Ende der Woche zeigen kann und was nicht:
+
+- Er zeigt Antwortzeit, Kosten, Zahl der Kandidaten je Modell, wo die Modelle uneins waren und
+  was der Kurs nach den Kandidaten jedes Modells tat.
+- Drei Handelstage liefern wenige Kandidaten (am 17.11. waren es 9). Das reicht für eine
+  Tendenz und für das Nachlesen der uneinigen Fälle, nicht für einen Beweis.
+- Trades entstehen nur aus Opus' Bewertungen. Ob Haiku oder Sonnet besser gehandelt hätten,
+  lässt sich nur am Kursverlauf nach ihren Kandidaten ablesen, nicht an echten Trades.
+- Solange jede Meldung erst vom Kurs bestätigt werden muss, fallen Fehlalarme kaum ins Gewicht.
+  Wichtig wird die Qualität der Bewertung, wenn der Bot sofort einsteigen soll (Vorschlag V15).
+
 ## Bekannte Schwächen des Tests
 
 - **Papertrading füllt Orders zu günstig aus.** Echte Kursrutscher bei Nachrichten bildet
@@ -207,3 +258,5 @@ wenn die Zahlen es nicht tragen.
   Ergebnis gegen den Depotwert zum Börsenschluss des Vortags. Vorher zählte er ab dem letzten
   Start des Bots; nach dem Neustart am Nachmittag des 17.11. weist der Abschluss dieses Tages
   deshalb fast null aus statt des echten Verlusts. Die Wochenstatistik gleicht das aus.
+- 2026-11-17 (Entscheidung Josh, aktiv ab 18.11.): Opus 5.5 bewertet und entscheidet, Haiku 5.5
+  und Sonnet 5.5 bewerten zum Vergleich mit. Einzelheiten im Abschnitt „Modelltest“.

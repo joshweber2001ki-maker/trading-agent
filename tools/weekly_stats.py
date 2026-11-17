@@ -157,6 +157,94 @@ def speed_stats(rows):
     return out
 
 
+# List prices in $ per million tokens (input, output), as of 2026-11-17.
+PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0), "claude-haiku-5-5": (0.10, 0.50)}
+
+
+def news_limits(root):
+    """The thresholds a rating must reach to be traded, from config.toml."""
+    try:
+        import tomllib
+        n = tomllib.loads((root / "config.toml").read_text(encoding="utf-8"))["news"]
+        return n["min_surprise"], n["min_confidence"], n["min_impact"]
+    except Exception:
+        return 7, 6, 1
+
+
+def model_stats(classified, shadows, fallbacks, outcomes, limits):
+    """The same articles as rated by each model, against what the price did afterwards.
+
+    Since 2026-11-18 one model decides and others rate along. Everything that compares the models
+    looks only at articles that all of them rated, so that a model is not judged on easier news.
+    """
+    min_surprise, min_confidence, min_impact = limits
+
+    def med(xs, q=0.5):
+        xs = sorted(x for x in xs if x is not None)
+        return round(xs[min(len(xs) - 1, int(len(xs) * q))], 1) if xs else None
+
+    def candidate(v):
+        return bool(v) and v.get("direction") in ("up", "down") and (v.get("surprise") or 0) >= min_surprise \
+            and (v.get("confidence") or 0) >= min_confidence and (v.get("impact") or 0) >= min_impact
+
+    decided = [e for e in classified if e.get("model") and e.get("phase") == "live"]
+    if not decided:
+        return {"models": {}, "common": 0}
+    rows = defaultdict(list)                       # model -> every rating it gave
+    by_article = defaultdict(dict)                 # article -> model -> verdict
+    info = {}                                      # article -> headline and the symbol the outcome was measured for
+    for e in decided:
+        rows[e["model"]].append(e)
+        by_article[e["article"]][e["model"]] = e["verdict"]
+        info[e["article"]] = (e.get("headline", ""), e["symbol"])
+    failed = Counter(f.get("failed") for f in fallbacks)
+    for e in shadows:
+        if e.get("verdict"):
+            rows[e["model"]].append(e)
+            by_article[e["article"]].setdefault(e["model"], e["verdict"])
+        else:
+            failed[e.get("model")] += 1
+    models = sorted(rows, key=lambda m: (-sum(1 for e in decided if e["model"] == m), m))
+    common = [a for a, vs in by_article.items() if a in info and all(m in vs for m in models)]
+    price = {(o.get("article"), o.get("symbol")): o for o in outcomes}
+
+    def after(article, verdict):
+        """The measured price path, if the model rated the stock it was measured for."""
+        o = price.get((article, info[article][1]))
+        return o if o and verdict.get("symbol") == info[article][1] else None
+
+    movers = [a for a in common if (price.get((a, info[a][1])) or {}).get("ret_30") is not None
+              and abs(price[(a, info[a][1])]["ret_30"]) >= MOVER_PCT]
+    out = {"models": {}, "common": len(common), "movers": len(movers), "limits": list(limits)}
+    for m in models:
+        mine = rows[m]
+        tin, tout = [e.get("tokens_in") or 0 for e in mine], [e.get("tokens_out") or 0 for e in mine]
+        pin, pout = PRICES.get(m, (None, None))
+        cost = (sum(tin) * pin + sum(tout) * pout) / 1e6 if pin is not None else None
+        cands = [a for a in common if candidate(by_article[a][m])]
+        seen = [dict(o, direction=by_article[a][m]["direction"]) for a in cands if (o := after(a, by_article[a][m]))]
+        out["models"][m] = {
+            "decided": sum(1 for e in decided if e["model"] == m), "ratings": len(mine), "failed": failed.get(m, 0),
+            "seconds_median": med(e.get("model_s") for e in mine), "seconds_p90": med((e.get("model_s") for e in mine), 0.9),
+            "tokens_in": round(sum(tin) / len(mine)), "tokens_out": round(sum(tout) / len(mine)),
+            "cost": round(cost, 2) if cost is not None else None,
+            "cents_per_rating": round(cost / len(mine) * 100, 3) if cost is not None else None,
+            "with_direction": sum(1 for a in common if by_article[a][m].get("direction") in ("up", "down")),
+            "candidates": len(cands), "candidates_vs_price": outcome_stats(seen),
+            "movers_caught": sum(1 for a in movers if a in cands and after(a, by_article[a][m])
+                                 and (price[(a, info[a][1])]["ret_30"] > 0) == (by_article[a][m]["direction"] == "up")),
+        }
+    differ = [a for a in common if len({candidate(by_article[a][m]) for m in models}) > 1]
+    move = lambda a: (price.get((a, info[a][1])) or {}).get("ret_30")
+    differ.sort(key=lambda a: -abs(move(a) or 0))
+    out["differences"] = len(differ)
+    out["examples"] = [{
+        "symbol": info[a][1], "headline": info[a][0], "ret_30": move(a),
+        "verdicts": {m: "{direction} {surprise}/{impact}/{confidence}".format(**{"impact": "?", **by_article[a][m]}) for m in models},
+    } for a in differ[:12]]
+    return out
+
+
 def build(root: Path, start: date, end: date):
     days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
     trades = apply_corrections(
@@ -185,6 +273,8 @@ def build(root: Path, start: date, end: date):
     classified = [e for e in events if e["kind"] == "news_classified"]
     outcomes = [e for e in events if e["kind"] == "news_outcome"]
     speed = [e for e in events if e["kind"] == "news_speed"]
+    shadows = [e for e in events if e["kind"] == "news_shadow"]
+    fallbacks = [e for e in events if e["kind"] == "news_fallback"]
     news_trades = by_strategy.get("news", [])
     by_category = defaultdict(list)
     for t in news_trades:
@@ -235,6 +325,11 @@ def build(root: Path, start: date, end: date):
                                         and (o.get("confidence") or 0) >= 6]),
             "by_source": {src: outcome_stats([o for o in outcomes if o.get("source") == src])
                           for src in sorted({o.get("source") or "?" for o in outcomes})},
+        },
+        "models": model_stats(classified, shadows, fallbacks, outcomes, news_limits(root)),
+        "news_by_model": {
+            m: trade_stats([t for t in news_trades if (t.get("meta", {}).get("model") or "?") == m])
+            for m in sorted({t.get("meta", {}).get("model") or "?" for t in news_trades})
         },
         "speed": {
             "all": speed_stats(speed),
@@ -299,6 +394,31 @@ def markdown(r):
             f"- gesamt: {fo(rv['all'])}", f"- wie gehandelt würde (Richtung, Wirkung >= 1, Überraschung >= 7, Sicherheit >= 6): {fo(rv['tradeable'])}"]
     out += [f"- Wirkung {k}: {fo(v)}" for k, v in rv["by_impact"].items()]
     out += [f"- Quelle {k}: {fo(v)}" for k, v in rv["by_source"].items()]
+    ms = r["models"]
+    if ms["models"]:
+        lim = ms["limits"]
+        out += ["", "## Modellvergleich: dieselben Meldungen, von jedem Modell bewertet",
+                "(Das zuerst genannte Modell hat entschieden, die anderen liefen ohne Einfluss auf den Handel mit.)"]
+        for m, v in ms["models"].items():
+            out.append(
+                f'- {m}: {v["ratings"]} Bewertungen, davon {v["decided"]} entscheidend, {v["failed"]} Ausfälle; Antwortzeit '
+                f'{v["seconds_median"]} s (90 % unter {v["seconds_p90"]} s); {v["tokens_in"]}+{v["tokens_out"]} Token je Bewertung; '
+                f'Kosten {v["cost"]} $ ({v["cents_per_rating"]} Cent je Bewertung)')
+        out.append(f'- Von allen Modellen bewertet: {ms["common"]} Meldungen. Die folgenden Zahlen beziehen sich nur auf diese.')
+        out.append(f'- Kandidaten (Richtung, Überraschung >= {lim[0]}, Sicherheit >= {lim[1]}, Wirkung >= {lim[2]}): '
+                   + ", ".join(f'{m} {v["candidates"]}' for m, v in ms["models"].items())
+                   + f'; uneinig bei {ms["differences"]} Meldungen')
+        out += [f'- Kurs nach den Kandidaten von {m}: {fo(v["candidates_vs_price"])}' for m, v in ms["models"].items()]
+        out.append(f'- Meldungen mit mindestens {MOVER_PCT:g} % Bewegung nach 30 min: {ms["movers"]}; davon als Kandidat mit '
+                   'richtiger Richtung erkannt: ' + ", ".join(f'{m} {v["movers_caught"]}' for m, v in ms["models"].items()))
+        if ms["examples"]:
+            out.append("- Uneinige Fälle, größte Kursbewegung zuerst (Richtung Überraschung/Wirkung/Sicherheit):")
+            for x in ms["examples"]:
+                mv = "nicht gemessen" if x["ret_30"] is None else f'{x["ret_30"]:+.2f} % nach 30 min'
+                out.append(f'  - {x["symbol"]} ({mv}): {x["headline"][:90]} | '
+                           + " | ".join(f"{m}: {v}" for m, v in x["verdicts"].items()))
+        out += [f"- Trades nach Entscheidung von {k}: {fmt(v)}" for k, v in r["news_by_model"].items()]
+
     def fs(o):
         thin = f' (dazu {o["thin"]} ohne Handel in den 10 Minuten davor)' if o.get("thin") else ""
         if not o["n"]:

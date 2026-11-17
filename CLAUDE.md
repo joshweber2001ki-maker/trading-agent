@@ -18,7 +18,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/news_strategy.py` | Meldung → KI-Bewertung → Bestätigung durch Kurs und Volumen → Einstieg |
 | `bot/orb_strategy.py` | Ausbruch aus der Eröffnungsspanne (abgeschaltet seit 17.11.2026) |
 | `bot/executor.py` | Positionsgröße, Risikogrenzen, Order mit Stop und Ziel, Zeitlimit, Glattstellen |
-| `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API |
+| `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API. Ein Modell entscheidet (`[llm] model`), weitere bewerten zum Vergleich mit (`shadow`); jedes Modell braucht eine eigene Form der Anfrage |
 | `bot/wires.py` | zweite Nachrichtenquelle: Pressemitteilungen von PR Newswire, Firmenname → Börsenkürzel |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
 | `bot/edgar.py` | Liste der Pflichtmitteilungen an die SEC (Formular 8-K) mit Annahmezeit; nur Messung, kein Handel |
@@ -29,6 +29,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `tools/backtest_orb.py` | grobe Rückrechnung der Ausbruchs-Strategie (braucht Alpaca-Schlüssel) |
 | `tools/replay_news.py` | einen vergangenen Tag durch die News-Strategie spielen (braucht beide Schlüssel) |
 | `tools/speed_check.py` | eine einzelne Meldung von Hand nachmessen (braucht Alpaca-Schlüssel) |
+| `tools/llm_check.py` | alle eingestellten Modelle drei Beispielmeldungen bewerten lassen: Antwortzeit, Token, Limits (braucht den Anthropic-Schlüssel) |
 | `deploy/` | Installation, Dienste, stündlicher Abgleich mit GitHub |
 | `memory/strategy.md` | die Strategie in Worten, mit Begründung der Startwerte |
 | `logs/` | Protokolle des Servers (werden stündlich vom Server hochgeladen) |
@@ -59,13 +60,22 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
   Einstiege. `systemctl stop trading-bot` beendet den Bot; offene Positionen sind über Stop-
   und Zielorders beim Broker abgesichert.
 
+## Modelltest bis 20.11.2026
+
+Vom 18. bis 20.11.2026 bewertet Opus 5.5 und entscheidet (Wunsch von Josh), Haiku 5.5 und Sonnet 5.5
+bewerten jede Meldung in der Handelszeit zum Vergleich mit. Der Wochenrückblick wertet das aus
+(`tools/weekly_stats.py`, Abschnitt „Modellvergleich“). Welches Modell danach entscheidet, legt Josh
+fest; bis dahin `[llm]` in `config.toml` nicht ändern. Einzelheiten: `memory/strategy.md`, „Modelltest“.
+
 ## Protokolle lesen
 
 - `logs/status.json` – Lebenszeichen des Bots (jede Minute neu, stündlich hochgeladen)
 - `logs/trades.jsonl` – ein Eintrag je abgeschlossenem Trade
 - `logs/events-JJJJ-MM-TT.jsonl` – alle Entscheidungen: jede zugeordnete Pressemitteilung mit
   Veröffentlichungszeit (`wire_item`), jede SEC-Meldung mit Annahmezeit (`sec_item`), der
-  Kursverlauf im Sekundentakt danach (`news_speed`), bewertete Meldungen (`news_classified`),
+  Kursverlauf im Sekundentakt danach (`news_speed`), bewertete Meldungen (`news_classified`, mit
+  `model` = das Modell, dessen Bewertung zählt), die Bewertungen der mitlaufenden Modelle
+  (`news_shadow`), Einspringen des Ersatzmodells (`news_fallback`),
   Kursverlauf in Minuten danach (`news_outcome`), abgelehnte Signale mit Grund, Fehler,
   Eingriffe des Wächters (`guard`)
 - `logs/daily/JJJJ-MM-TT.json` – Tagesabschluss. Das Ergebnis misst gegen den Depotwert zum
