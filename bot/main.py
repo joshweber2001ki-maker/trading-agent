@@ -15,6 +15,7 @@ from .llm import Classifier
 from .market import Session, Universe
 from .news_strategy import NewsStrategy
 from .orb_strategy import OrbStrategy
+from .wires import Wires
 
 NEWS_WS = "wss://stream.data.alpaca.markets/v1beta1/news"
 
@@ -36,6 +37,7 @@ class Bot:
         self.news = NewsStrategy(
             self.api, self.cfg, self.journal, self.session, self.universe, self.executor, self.llm, self.orb
         )
+        self.wires = Wires(self.cfg["wires"], self.universe, self.news.on_article, self.journal)
         self.day = None
         self.flattened = False
         self.start_equity = None
@@ -59,13 +61,16 @@ class Bot:
                     additional_headers={"APCA-API-KEY-ID": self.key, "APCA-API-SECRET-KEY": self.secret},
                 ) as ws:
                     await ws.send(json.dumps({"action": "subscribe", "news": ["*"]}))
-                    log.info("news stream connected")
-                    backoff, self.ws_connected = 2, True
                     async for raw in ws:
                         for m in json.loads(raw):
                             if m.get("T") == "n":
                                 asyncio.create_task(self.news.on_article(m))
+                            elif m.get("T") == "subscription":
+                                log.info("news stream connected")
+                                backoff, self.ws_connected = 2, True
                             elif m.get("T") == "error":
+                                # 406 = another process already holds the account's single stream connection
+                                self.ws_connected = False
                                 self.journal.event("error", where="news_ws", error=str(m))
             except Exception as e:
                 self.errors += 1
@@ -104,7 +109,8 @@ class Bot:
             "version": self.version, "day": self.day, "trading_day": s.trading_day,
             "market_open": s.is_open(), "news_stream": self.ws_connected,
             "llm_available": self.llm.available, "llm_calls_today": self.llm.day_calls,
-            "news": self.news.stats, "orb_stage": self.orb.stage, "orb_watching": sorted(self.orb.ranges),
+            "news": self.news.stats, "wires": self.wires.stats,
+            "orb_stage": self.orb.stage, "orb_pool": len(self.orb.pool), "orb_watching": sorted(self.orb.ranges),
             "open_trades": [
                 {"symbol": t.symbol, "strategy": t.strategy, "side": t.side, "qty": t.qty, "status": t.status}
                 for t in self.executor.trades.values()
@@ -120,6 +126,7 @@ class Bot:
         self.executor.start_day(self.day)
         self.news.reset_day()
         self.orb.reset_day()
+        self.wires.reset_day()
         self.llm.reset_day()
         try:
             universe = await self.universe.load()
@@ -146,7 +153,7 @@ class Bot:
         summary = {
             "day": self.day, "equity_start": self.start_equity, "equity_end": equity,
             "pnl": round(equity - (self.start_equity or equity), 2),
-            "trades": self.executor.trades_today, "news": self.news.stats,
+            "trades": self.executor.trades_today, "news": self.news.stats, "wires": self.wires.stats,
             "llm_calls": self.llm.day_calls, "errors": self.errors,
             "orb_watched": sorted(self.orb.ranges), "orb_traded": sorted(self.orb.fired),
         }
@@ -163,7 +170,7 @@ class Bot:
         log.info("bot started; llm=%s day=%s trading_day=%s", self.llm.available, self.session.day, self.session.trading_day)
         if not self.llm.available:
             log.warning("ANTHROPIC_API_KEY fehlt: News-Strategie inaktiv, nur Ausbruchs-Strategie läuft")
-        await asyncio.gather(self.news_loop(), self.control_loop())
+        await asyncio.gather(self.news_loop(), self.control_loop(), self.wires.run())
 
 
 def main():

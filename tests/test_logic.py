@@ -10,8 +10,9 @@ from bot.common import ET, Journal, iso, load_config, parse_ts
 from bot.executor import Executor, position_size
 from bot.llm import is_noise, parse_verdict
 from bot.news_strategy import confirmation, stop_distance_pct
-from bot.orb_strategy import assess, breakout, opening_range, relative_volume
+from bot.orb_strategy import OrbStrategy, assess, breakout, opening_range, relative_volume
 from bot.orb_strategy import stop_distance_pct as orb_stop_pct
+from bot.wires import NameIndex, normalize, parse_feed, to_article
 from tools.weekly_stats import build, default_week, markdown, week_of
 
 CFG = load_config()
@@ -96,14 +97,72 @@ def test_orb_assess_and_stop():
     assert orb_stop_pct(2.4, 0.5, 0.3, 1.0) == 1.0
 
 
-def test_relative_volume_uses_opening_bars_only():
-    hist = []
-    for d in range(1, 9):
-        day = datetime(2026, 11, 2, 9, 30, tzinfo=ET) + timedelta(days=d)
-        hist.append({"t": iso(day), "v": 10_000})
-        hist.append({"t": iso(day + timedelta(minutes=15)), "v": 99_999})
-    assert relative_volume(25_000, hist) == pytest.approx(2.5)
-    assert relative_volume(25_000, hist[:2]) is None
+def test_relative_volume():
+    assert relative_volume(25_000, [10_000] * 8) == pytest.approx(2.5)
+    assert relative_volume(25_000, [10_000, 10_000]) is None            # too little history
+    assert relative_volume(30_000, [1] * 5 + [10_000] * 10) == pytest.approx(3.0)   # only the last 10 days count
+
+
+def test_orb_keeps_only_fresh_news_candidates_overnight():
+    orb = OrbStrategy(None, CFG, None, None, None, None)
+    orb.add_candidate("NVDA", source="static")
+    orb.add_candidate("HD", source="news", verdict={"surprise": 8})
+    orb.add_candidate("OLD", source="news", verdict={"surprise": 9})
+    orb.pool["OLD"]["added"] -= timedelta(hours=30)
+    orb.add_candidate("HD", source="static")                 # must not replace the news entry
+    assert orb.pool["HD"]["source"] == "news"
+    orb.reset_day()
+    assert list(orb.pool) == ["HD"] and orb.stage == "idle"
+
+
+def test_company_name_matching():
+    assets = {
+        "HD": {"name": "Home Depot, Inc."}, "NUTX": {"name": "Nutex Health Inc. Common Stock"},
+        "GOOGL": {"name": "Alphabet Inc. Class A Common Stock"}, "GOOG": {"name": "Alphabet Inc. Class C Capital Stock"},
+        "T": {"name": "AT&T Inc."}, "JD": {"name": "JD.com, Inc. American Depositary Shares"},
+        "SOXL": {"name": "Direxion Daily Semiconductor Bull 3X ETF"},
+        "XYZW": {"name": "Xyz Acquisition Corp. Warrant"}, "TME": {
+            "name": "Tencent Music Entertainment Group American Depositary Shares, each representing two Class A Ordinary Shares"},
+    }
+    idx = NameIndex(assets)
+    assert idx.lookup("The Home Depot") == "HD"
+    assert idx.lookup("Nutex Health, Inc.") == "NUTX"
+    assert idx.lookup("Alphabet Inc.") == "GOOG"            # one ticker per company
+    assert idx.lookup("AT&T Inc.") == "T"
+    assert idx.lookup("Tencent Music Entertainment Group") == "TME"
+    assert idx.lookup("Home Depot Supply Partners LLC") is None     # no partial matches
+    assert idx.lookup("Xyz Acquisition Corp.") is None              # warrants are not the company's share
+    assert idx.lookup("Direxion") is None and idx.lookup("") is None
+    assert normalize("S&P Global Inc.") == "s and p global"
+
+
+FEED = """<?xml version="1.0"?><rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel>
+<item><title>The Home Depot Names New CEO</title><guid>https://x/hd-1.html</guid>
+<pubDate>Tue, 17 Nov 2026 10:43:00 +0000</pubDate><description>&lt;p&gt;ATLANTA -- The Home   Depot today announced...&lt;/p&gt;</description>
+<dc:contributor>The Home Depot</dc:contributor><dc:language>en-US</dc:language></item>
+<item><title>Empresa anuncia resultados</title><guid>https://x/es-1.html</guid>
+<pubDate>Tue, 17 Nov 2026 10:40:00 +0000</pubDate><description>x</description>
+<dc:contributor>The Home Depot</dc:contributor><dc:language>es</dc:language></item>
+<item><title>Law firm reminds investors of Nutex Health (NASDAQ: NUTX) deadline</title><guid>https://x/law-1.html</guid>
+<pubDate>Tue, 17 Nov 2026 10:30:00 +0000</pubDate><description>x</description>
+<dc:contributor>Some Law Firm LLP</dc:contributor><dc:language>en-US</dc:language></item>
+<item><title>Private company opens office</title><guid>https://x/p-1.html</guid>
+<pubDate>Tue, 17 Nov 2026 10:20:00 +0000</pubDate><description>x</description>
+<dc:contributor>Costero Brokers LLC</dc:contributor><dc:language>en-US</dc:language></item>
+<item><title>Broken date</title><guid>https://x/b-1.html</guid><pubDate>not a date</pubDate></item>
+</channel></rss>"""
+
+
+def test_wire_feed_to_articles():
+    assets = {"HD": {"name": "Home Depot, Inc."}, "NUTX": {"name": "Nutex Health Inc. Common Stock"}}
+    idx = NameIndex(assets)
+    items = parse_feed(FEED)
+    assert len(items) == 4 and items[0]["summary"] == "ATLANTA -- The Home Depot today announced..."
+    arts = [to_article(i, idx, assets, "prnewswire", 420) for i in items]
+    assert [a["symbols"][0] if a else None for a in arts] == ["HD", None, "NUTX", None]   # es: skipped; law firm: ticker in title
+    a = arts[0]
+    assert a["created_at"] == "2026-11-17T10:43:00Z" and a["source"] == "prnewswire" and a["max_age_s"] == 420
+    assert a["id"].startswith("prnewswire:") and a["headline"] == "The Home Depot Names New CEO"
 
 
 # ── simulated broker ─────────────────────────────────────────────────────────

@@ -64,7 +64,8 @@ systemctl start trading-bot-sync.timer
 echo
 echo "Fertig installiert."
 echo "GitHub-Hostschlüssel: $(as_trader ssh-keygen -lf /home/trader/.ssh/known_hosts | head -1)"
-if as_trader ssh -o BatchMode=yes -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+# </dev/null matters: when this script is piped into bash, ssh would otherwise swallow the rest of it.
+if as_trader ssh -o BatchMode=yes -T git@github.com </dev/null 2>&1 | grep -q "successfully authenticated"; then
   as_trader git -C "$APP" remote set-url origin "$REPO_SSH"
   as_trader git -C "$APP" remote set-url --push origin "$REPO_SSH"
   echo "GitHub-Zugriff per Deploy-Key funktioniert."

@@ -55,6 +55,10 @@ async def main():
         ) as ws:
             await ws.recv()
             auth = json.loads(await ws.recv())[0]
+            if auth.get("code") == 406:
+                return "Zugang in Ordnung; die eine erlaubte Verbindung hält gerade der laufende Bot"
+            if auth.get("T") == "error":
+                raise RuntimeError(auth)
             return auth.get("msg")
 
     async def llm():
@@ -83,7 +87,17 @@ async def main():
     await step("Börsenuhr", clock())
     await step("Kursdaten", data())
     await step("Screener", screener())
+    async def wires():
+        import httpx
+        from bot.wires import UA, parse_feed
+        async with httpx.AsyncClient(timeout=15, headers={"User-Agent": UA}) as c:
+            r = await c.get(cfg["wires"]["feeds"][0])
+            r.raise_for_status()
+            items = parse_feed(r.text)
+        return f'{len(items)} Meldungen, neueste: {items[0]["title"][:60]!r}'
+
     await step("Nachrichtenstrom", news_stream())
+    await step("Pressemitteilungen", wires())
     await step("KI-Bewertung", llm())
     if "--order-test" in sys.argv:
         await step("Order mit Stop und Ziel", order_test())

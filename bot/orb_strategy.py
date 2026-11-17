@@ -26,14 +26,9 @@ def opening_range(bars, open_dt, minutes):
     }
 
 
-def relative_volume(today_vol, hist_bars, open_hm=(9, 30)):
+def relative_volume(today_vol, earlier_vols):
     """Today's opening-range volume against the average of the same window on earlier days."""
-    vols = []
-    for b in hist_bars:
-        t = parse_ts(b["t"]).astimezone(ET)
-        if (t.hour, t.minute) == open_hm:
-            vols.append(b["v"])
-    vols = vols[-10:]
+    vols = [v for v in earlier_vols if v][-10:]
     if len(vols) < 3:
         return None
     avg = sum(vols) / len(vols)
@@ -82,13 +77,17 @@ class OrbStrategy:
         self.reset_day()
 
     def reset_day(self):
-        self.pool = {}        # symbol -> why it is in the pool
+        # News candidates collected since yesterday's close stay; everything else is rebuilt.
+        keep_after = now() - timedelta(hours=self.cfg["news_candidate_max_age_h"])
+        old = getattr(self, "pool", {})
+        self.pool = {s: i for s, i in old.items() if i.get("source") == "news" and i["added"] >= keep_after}
         self.ranges = {}      # symbol -> opening range, gap, rvol (the watched candidates)
         self.fired = set()
         self.stage = "idle"   # idle -> pooled -> ranged -> done
 
     def add_candidate(self, symbol, **info):
-        self.pool.setdefault(symbol, info)
+        if info.get("source") == "news" or symbol not in self.pool:
+            self.pool[symbol] = {**info, "added": now()}
 
     def entry_deadline(self):
         h, m = map(int, self.cfg["entry_until"].split(":"))
@@ -115,7 +114,7 @@ class OrbStrategy:
 
     async def _build_pool(self):
         for sym in self.cfg["static_pool"]:
-            self.add_candidate(sym, source="static")
+            self.add_candidate(sym, source="static")   # does not replace a news entry for the same symbol
         try:
             mv = await self.api.movers(30)
             for row in (mv.get("gainers") or []) + (mv.get("losers") or []):
@@ -130,58 +129,70 @@ class OrbStrategy:
                 self.cfg["exclude_funds"] and await self.universe.is_fund(sym)
             ):
                 self.pool.pop(sym)
-        self.journal.event("orb_pool", size=len(self.pool), symbols=sorted(self.pool))
+        # Keep the pool measurable in one go: all fixed and screener names, the most surprising news names.
+        news = sorted((s for s, i in self.pool.items() if i.get("source") == "news"),
+                      key=lambda s: -self.pool[s].get("verdict", {}).get("surprise", 0))
+        for sym in news[self.cfg["max_news_candidates"]:]:
+            self.pool.pop(sym)
+        self.journal.event("orb_pool", size=len(self.pool), news=news[: self.cfg["max_news_candidates"]],
+                           symbols=sorted(self.pool))
 
-    async def _measure(self, sym, gap, sem):
-        """Opening range and relative volume for one symbol."""
-        s, n = self.session, self.cfg["range_min"]
-        async with sem:
-            bars = await self.api.bars(sym, "1Min", iso(s.open), iso(s.open + timedelta(minutes=n)))
-            rng = opening_range(bars, s.open, n)
-            if not rng:
-                return sym, None, "no_bars"
-            hist = await self.api.bars(sym, f"{n}Min", iso(s.open - timedelta(days=21)), iso(s.open))
-        rvol = relative_volume(rng["volume"], hist, (s.open.hour, s.open.minute))
-        mid = (rng["high"] + rng["low"]) / 2
-        info = {
-            **rng, "gap_pct": round(gap, 2), "rvol": round(rvol, 2) if rvol is not None else None,
-            "width_pct": round((rng["high"] - rng["low"]) / mid * 100, 2),
-            "source": self.pool[sym].get("source"),
-        }
-        return sym, info, assess(rng, gap, rvol, self.cfg, is_news=info["source"] == "news")
+    async def _earlier_opens(self, days=10):
+        """Opening times of the previous trading days (handles holidays and half days)."""
+        s = self.session
+        start = (s.open - timedelta(days=days * 2 + 6)).strftime("%Y-%m-%d")
+        end = (s.open - timedelta(days=1)).strftime("%Y-%m-%d")
+        out = []
+        for c in await self.api.calendar(start, end):
+            h, m = map(int, c["open"].split(":"))
+            y, mo, d = map(int, c["date"].split("-"))
+            out.append(s.open.replace(year=y, month=mo, day=d, hour=h, minute=m))
+        return out[-days:]
 
     async def _rank(self):
         """After the opening range: measure every pool symbol and keep the best by relative volume."""
-        today, cfg = self.session.day, self.cfg
+        s, cfg, n = self.session, self.cfg, self.cfg["range_min"]
         gaps, syms = {}, list(self.pool)
         for i in range(0, len(syms), 50):
             for sym, sn in (await self.api.snapshots(syms[i:i + 50])).items():
                 d, p = sn.get("dailyBar") or {}, sn.get("prevDailyBar") or {}
                 if not d or not p or not p.get("c"):
                     continue
-                if parse_ts(d["t"]).astimezone(ET).strftime("%Y-%m-%d") != today:
+                if parse_ts(d["t"]).astimezone(ET).strftime("%Y-%m-%d") != s.day:
                     continue  # no trade today yet on this data feed
                 if d["o"] >= cfg["min_price"]:
                     gaps[sym] = (d["o"] - p["c"]) / p["c"] * 100
-        sem = asyncio.Semaphore(4)
-        results = await asyncio.gather(
-            *(self._measure(sym, gap, sem) for sym, gap in gaps.items()), return_exceptions=True
+        live = list(gaps)
+        span = timedelta(minutes=n)
+        today = await self.api.bars_multi(live, "1Min", iso(s.open), iso(s.open + span))
+        opens = await self._earlier_opens()
+        earlier = await asyncio.gather(
+            *(self.api.bars_multi(live, f"{n}Min", iso(o), iso(o + span - timedelta(seconds=1))) for o in opens)
         )
         passed = []
-        for r in results:
-            if isinstance(r, Exception):
-                self.journal.event("error", where="orb_rank", error=repr(r)[:200])
+        for sym in live:
+            rng = opening_range(today.get(sym) or [], s.open, n)
+            if not rng:
+                self.journal.event("rejected", stage="orb_rank", symbol=sym, reason="no_bars")
                 continue
-            sym, info, reason = r
+            vols = [day[sym][0]["v"] for day in earlier if day.get(sym)]
+            rvol = relative_volume(rng["volume"], vols)
+            mid = (rng["high"] + rng["low"]) / 2
+            info = {
+                **rng, "gap_pct": round(gaps[sym], 2), "rvol": round(rvol, 2) if rvol is not None else None,
+                "width_pct": round((rng["high"] - rng["low"]) / mid * 100, 2),
+                "source": self.pool[sym].get("source"),
+            }
+            reason = assess(rng, gaps[sym], rvol, cfg, is_news=info["source"] == "news")
             if reason:
-                self.journal.event("rejected", stage="orb_rank", symbol=sym, reason=reason, **(info or {}))
+                self.journal.event("rejected", stage="orb_rank", symbol=sym, reason=reason, **info)
             else:
                 passed.append((info["rvol"], sym, info))
         passed.sort(reverse=True)
         self.ranges = {sym: info for _, sym, info in passed[: cfg["max_candidates"]]}
         for _, sym, info in passed[cfg["max_candidates"]:]:
             self.journal.event("rejected", stage="orb_rank", symbol=sym, reason="not_top_rvol", **info)
-        self.journal.event("orb_ranges", measured=len(gaps), ranges=self.ranges)
+        self.journal.event("orb_ranges", pool=len(syms), measured=len(live), ranges=self.ranges)
 
     async def _watch(self):
         cfg = self.cfg
@@ -198,6 +209,12 @@ class OrbStrategy:
                 continue
             self.fired.add(sym)
             dirn = 1 if side == "long" else -1
+            with_gap = (rng["gap_pct"] > 0) == (side == "long")
+            with_range = rng.get("range_dir") == ("up" if side == "long" else "down")
+            if (cfg["direction"] == "gap" and not with_gap) or (cfg["direction"] == "range" and not with_range):
+                self.journal.event("rejected", stage="orb_breakout", symbol=sym, side=side,
+                                   reason=f"against_{cfg['direction']}")
+                continue
             dist = stop_distance_pct(rng["width_pct"], cfg["stop_range_frac"], cfg["stop_min_pct"], cfg["stop_max_pct"])
             await self.executor.enter({
                 "strategy": "orb", "symbol": sym, "side": side, "price": price,
@@ -205,7 +222,6 @@ class OrbStrategy:
                 "target_r": cfg["target_r"], "max_hold_min": cfg["max_hold_min"],
                 "meta": {
                     **rng, "stop_dist_pct": round(dist, 3),
-                    "with_gap": (rng["gap_pct"] > 0) == (side == "long"),
-                    "with_range_dir": rng.get("range_dir") == ("up" if side == "long" else "down"),
+                    "with_gap": with_gap, "with_range_dir": with_range,
                 },
             })

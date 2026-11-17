@@ -54,16 +54,39 @@ stop_range_frac          = 0.5   # Stop-Abstand = Faktor x Breite der Spanne
 stop_min_pct             = 0.3
 stop_max_pct             = 1.0
 target_r                 = 2.0
-max_hold_min             = 90    # Zeitlimit pro Trade
+max_hold_min             = 30    # Zeitlimit pro Trade
+direction                = "both"   # "both", "gap" (nur in Richtung der Kurslücke) oder "range" (nur in Richtung der Spanne)
 entry_until              = "11:00"  # New Yorker Zeit, danach keine neuen Ausbrüche
-premarket_news_from      = "06:00"  # ab dann werden vorbörsliche Meldungen bewertet (New Yorker Zeit)
+# Meldungen außerhalb der Handelszeit liefern Kandidaten für die nächste Eröffnung:
+premarket_news_from      = "00:00"  # New Yorker Zeit; zusammen mit dem Abend davor = durchgehend ab Börsenschluss
 premarket_news_min_surprise = 6
+news_candidate_max_age_h = 20    # ältere Meldungen zählen für die nächste Eröffnung nicht mehr
+max_news_candidates      = 40    # höchstens so viele News-Kandidaten kommen in den Pool
 # Liquide, schwankungsfreudige Aktien, die immer mit geprüft werden
 static_pool = ["NVDA", "TSLA", "AMD", "META", "AMZN", "AAPL", "MSFT", "PLTR", "COIN", "AVGO", "NFLX", "SMCI", "MU", "GOOGL", "INTC", "MSTR", "HOOD", "UBER", "BA", "JPM"]
 
+[wires]
+# Zweite, schnellere Nachrichtenquelle: Pressemitteilungen direkt vom Verteiler PR Newswire.
+# Alpacas eigener Nachrichtenstrom liefert Meldungen nur gebündelt etwa alle 30 Minuten.
+enabled   = true
+poll_s    = 60      # jeder Feed wird so oft abgefragt (der Anbieter erneuert ihn nur einmal pro Minute)
+max_age_s = 420     # so alt darf eine Pressemitteilung für einen Trade höchstens sein
+feeds = [
+  "https://www.prnewswire.com/rss/news-releases-list.rss",
+  "https://www.prnewswire.com/rss/financial-services-latest-news/earnings-list.rss",
+  "https://www.prnewswire.com/rss/financial-services-latest-news/earnings-forecasts-projections-list.rss",
+  "https://www.prnewswire.com/rss/financial-services-latest-news/acquisitions-mergers-and-takeovers-list.rss",
+  "https://www.prnewswire.com/rss/financial-services-latest-news/contracts-list.rss",
+  "https://www.prnewswire.com/rss/financial-services-latest-news/stock-offering-list.rss",
+  "https://www.prnewswire.com/rss/financial-services-latest-news/restructuring-recapitalization-list.rss",
+  "https://www.prnewswire.com/rss/health-latest-news/fda-approval-list.rss",
+  "https://www.prnewswire.com/rss/health-latest-news/clinical-trials-medical-discoveries-list.rss",
+  "https://www.prnewswire.com/rss/general-business-latest-news/personnel-announcements-list.rss",
+]
+
 [llm]
 model              = "claude-haiku-5-5"
-thinking           = false   # true = gründlicher, aber mehrere Sekunden langsamer und teurer
-max_calls_per_hour = 80
-max_calls_per_day  = 500
+thinking           = false   # true = gründlicher, aber mehrere Sekunden langsamer
+max_calls_per_hour = 400
+max_calls_per_day  = 2000    # eine Bewertung kostet rund 0,0001 $, das Tageslimit also höchstens etwa 0,20 $
 timeout_s          = 20

@@ -116,6 +116,12 @@ def build(root: Path, start: date, end: date):
         "orb": {
             "with_gap": trade_stats([t for t in orb if t.get("meta", {}).get("with_gap")]),
             "against_gap": trade_stats([t for t in orb if not t.get("meta", {}).get("with_gap")]),
+            "with_range_dir": trade_stats([t for t in orb if t.get("meta", {}).get("with_range_dir")]),
+            "against_range_dir": trade_stats([t for t in orb if not t.get("meta", {}).get("with_range_dir")]),
+        },
+        "news_by_source": {
+            src: trade_stats([t for t in news_trades if t.get("meta", {}).get("source") == src])
+            for src in sorted({t.get("meta", {}).get("source") or "?" for t in news_trades})
         },
         "rejections": dict(rejections.most_common()),
         "errors": dict(errors),
@@ -151,9 +157,13 @@ def markdown(r):
             f'- übersprungen: {r["news"]["skipped"]}']
     for k, v in r["news"]["by_category"].items():
         out.append(f"- Kategorie {k}: {fmt(v)}")
+    for k, v in r["news_by_source"].items():
+        out.append(f"- Quelle {k}: {fmt(v)}")
     out += ["", "## Ausbruchs-Strategie",
             f'- in Richtung der Kurslücke: {fmt(r["orb"]["with_gap"])}',
             f'- gegen die Kurslücke: {fmt(r["orb"]["against_gap"])}',
+            f'- in Richtung der Eröffnungsspanne: {fmt(r["orb"]["with_range_dir"])}',
+            f'- gegen die Richtung der Eröffnungsspanne: {fmt(r["orb"]["against_range_dir"])}',
             "", "## Abgelehnte Signale (Stufe:Grund)"]
     out += [f"- {k}: {v}" for k, v in r["rejections"].items()] or ["- keine"]
     out += ["", "## Probleme",

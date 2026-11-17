@@ -38,22 +38,30 @@ class NewsStrategy:
         self.cfg = cfg["news"]
         self.orb_min_surprise = cfg["orb"]["premarket_news_min_surprise"]
         self.premarket_from = cfg["orb"]["premarket_news_from"]
-        self.seen = set()
+        self.seen = set()          # article ids and (symbol, headline) pairs already handled
+        self.recent = {}           # symbol -> time of the last trade candidate
         self.sem = asyncio.Semaphore(6)
         self.stats = {"received": 0, "classified": 0, "candidates": 0}
 
     def reset_day(self):
-        self.seen.clear()
+        if len(self.seen) > 50000:
+            self.seen.clear()
+        self.recent.clear()
         self.stats = {k: 0 for k in self.stats}
 
     def phase(self):
+        """'live' while trades are allowed, 'premarket' while news only feeds tomorrow's or today's
+        breakout candidates (from the close until shortly before the next open), else None."""
         s = self.session
-        if s.premarket(self.premarket_from):
-            return "premarket" if self.orb and self.orb.cfg["enabled"] else None
         if s.is_open():
             if s.since_open_min() >= self.cfg["start_after_open_min"] and \
                s.to_close_min() >= self.cfg["no_entry_before_close_min"]:
                 return "live"
+            return None
+        if not (self.orb and self.orb.cfg["enabled"]):
+            return None
+        if s.premarket(self.premarket_from) or (s.close is not None and now() >= s.close):
+            return "premarket"
         return None
 
     async def on_article(self, art: dict):
@@ -89,13 +97,20 @@ class NewsStrategy:
 
         if not symbols or len(symbols) > self.cfg["max_symbols"]:
             return  # market-wide or list articles: not logged, far too many
-        if phase == "live" and age > self.cfg["max_article_age_s"]:
+        max_age = art.get("max_age_s") or self.cfg["max_article_age_s"]
+        if phase == "live" and age > max_age:
             return skip("stale", age_s=round(age))
+        if phase == "premarket" and age > self.orb.cfg["news_candidate_max_age_h"] * 3600:
+            return  # old backlog from a feed, irrelevant for the next open
         if is_noise(head):
             return skip("noise")
         tradable = [s for s in symbols if await self.universe.asset(s)]
         if not tradable:
             return
+        title_key = (tradable[0], " ".join(head.lower().split())[:120])
+        if title_key in self.seen:
+            return  # the same release again (second feed, second language version, correction)
+        self.seen.add(title_key)
         names = {s: await self.universe.name(s) for s in tradable}
         snap_task = asyncio.create_task(self.api.snapshots(tradable))
         verdict, err = await self.llm.classify(art, tradable, names)
@@ -118,6 +133,11 @@ class NewsStrategy:
         if verdict["surprise"] < self.cfg["min_surprise"] or verdict["confidence"] < self.cfg["min_confidence"]:
             return
         self.stats["candidates"] += 1
+        last = self.recent.get(sym)
+        if last and (now() - last).total_seconds() < self.cfg["symbol_cooldown_min"] * 60:
+            # A later article about the same event must not trigger a late entry.
+            return self.journal.event("rejected", stage="pre_confirm", reason="recent_candidate", **base)
+        self.recent[sym] = now()
         ok, why = await self.executor.can_enter("news", sym)
         if not ok:
             return self.journal.event("rejected", stage="pre_confirm", reason=why, **base)
@@ -159,7 +179,7 @@ class NewsStrategy:
                     "price": price, "stop": price * (1 - dirn * dist_pct / 100),
                     "target_r": cfg["target_r"], "max_hold_min": cfg["max_hold_min"],
                     "meta": {
-                        "article": base["article"], "headline": base["headline"],
+                        "article": base["article"], "headline": base["headline"], "source": base["source"],
                         "verdict": verdict, "ref_price": ref,
                         "news_to_signal_s": round((now() - received).total_seconds(), 1) + base["age_s"],
                         "stop_dist_pct": round(dist_pct, 3), "confirm": detail,

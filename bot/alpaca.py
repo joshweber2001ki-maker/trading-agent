@@ -71,8 +71,8 @@ class Alpaca:
     async def clock(self):
         return await self._req("GET", self._t("/clock"))
 
-    async def calendar(self, day: str):
-        return await self._req("GET", self._t("/calendar"), params={"start": day, "end": day})
+    async def calendar(self, day: str, end: str = None):
+        return await self._req("GET", self._t("/calendar"), params={"start": day, "end": end or day})
 
     async def asset(self, symbol):
         return await self._req("GET", self._t(f"/assets/{symbol}"), ok404=True)
@@ -137,6 +137,23 @@ class Alpaca:
             params["end"] = end
         d = await self._req("GET", f"{DATA}/v2/stocks/{symbol}/bars", params=params)
         return (d or {}).get("bars") or []
+
+    async def bars_multi(self, symbols, timeframe, start, end):
+        """Bars for many symbols in one request (paged). Returns {symbol: [bars]}."""
+        out, tok = {}, None
+        if not symbols:
+            return out
+        while True:
+            params = {"symbols": ",".join(symbols), "timeframe": timeframe, "start": start, "end": end,
+                      "feed": self.feed, "limit": 10000}
+            if tok:
+                params["page_token"] = tok
+            d = await self._req("GET", f"{DATA}/v2/stocks/bars", params=params) or {}
+            for sym, bars in (d.get("bars") or {}).items():
+                out.setdefault(sym, []).extend(bars)
+            tok = d.get("next_page_token")
+            if not tok:
+                return out
 
     async def movers(self, top=20):
         return await self._req(
