@@ -1,5 +1,5 @@
 {
- "t": "2026-11-18T18:06:12Z",
+ "t": "2026-11-18T19:06:15Z",
  "version": "69631e0e4945eb10bd5b5b14b395b62505bcc3f9",
  "day": "2026-11-18",
  "trading_day": true,
@@ -7,25 +7,25 @@
  "news_stream": true,
  "llm_available": true,
  "llm_model": "claude-opus-5-5",
- "llm_calls_today": 96,
+ "llm_calls_today": 201,
  "llm_shadow_calls": {
-  "claude-haiku-5-5": 96,
-  "claude-sonnet-5-5": 96
+  "claude-haiku-5-5": 201,
+  "claude-sonnet-5-5": 201
  },
  "news": {
-  "received": 1249,
-  "classified": 96,
-  "candidates": 1
+  "received": 1405,
+  "classified": 201,
+  "candidates": 2
  },
  "wires": {
-  "polls": 7707,
-  "items": 808,
-  "matched": 76,
+  "polls": 8296,
+  "items": 855,
+  "matched": 78,
   "errors": 0
  },
  "edgar": {
-  "polls": 42,
-  "filings": 82,
+  "polls": 48,
+  "filings": 83,
   "matched": 67,
   "errors": 0
  },
