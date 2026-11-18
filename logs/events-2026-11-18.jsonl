@@ -1,0 +1,1 @@
+{"t": "2026-11-18T05:00:06Z", "kind": "day_start", "day": "2026-11-18", "trading_day": true, "universe": 12675, "equity": 102068.67, "last_equity": 102540.06, "llm": true, "llm_model": "claude-opus-5-5", "llm_shadow": ["claude-haiku-5-5", "claude-sonnet-5-5"], "news": true, "orb": false}

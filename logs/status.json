@@ -1,7 +1,7 @@
 {
- "t": "2026-11-18T04:06:35Z",
+ "t": "2026-11-18T05:06:41Z",
  "version": "69631e0e4945eb10bd5b5b14b395b62505bcc3f9",
- "day": "2026-11-17",
+ "day": "2026-11-18",
  "trading_day": true,
  "market_open": false,
  "news_stream": true,
@@ -13,27 +13,27 @@
   "claude-sonnet-5-5": 0
  },
  "news": {
-  "received": 373,
+  "received": 2,
   "classified": 0,
   "candidates": 0
  },
  "wires": {
-  "polls": 4108,
-  "items": 286,
-  "matched": 94,
+  "polls": 65,
+  "items": 10,
+  "matched": 0,
   "errors": 0
  },
  "edgar": {
-  "polls": 49,
-  "filings": 878,
-  "matched": 712,
+  "polls": 0,
+  "filings": 0,
+  "matched": 0,
   "errors": 0
  },
- "orb_stage": "done",
+ "orb_stage": "idle",
  "orb_pool": 58,
  "orb_watching": [],
  "open_trades": [],
- "trades_today": 2,
+ "trades_today": 0,
  "errors_today": 0,
  "flattened": false
 }
