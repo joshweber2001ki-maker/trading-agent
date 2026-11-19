@@ -31,6 +31,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `tools/replay_news.py` | einen vergangenen Tag durch die News-Strategie spielen (braucht beide Schlüssel) |
 | `tools/speed_check.py` | eine einzelne Meldung von Hand nachmessen (braucht Alpaca-Schlüssel) |
 | `tools/llm_check.py` | alle eingestellten Modelle drei Beispielmeldungen bewerten lassen: Antwortzeit, Token, Limits (braucht den Anthropic-Schlüssel) |
+| `tools/ext_check.py` | zeigt, was der Bot vor und nach der Börse vom Markt sieht: Handelszeiten laut Broker, Alter der Kurse, Spanne (nur lesend, braucht Alpaca-Schlüssel) |
 | `tools/finnhub_check.py` | zeigt, was der Finnhub-Schlüssel liefert: Erwartungen im Ergebniskalender, gesperrte Daten (braucht den Finnhub-Schlüssel) |
 | `deploy/` | Installation, Dienste, stündlicher Abgleich mit GitHub |
 | `memory/strategy.md` | die Strategie in Worten, mit Begründung der Startwerte |
