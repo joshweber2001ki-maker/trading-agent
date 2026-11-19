@@ -84,11 +84,16 @@ Messwerten dahinter: `reports/2026-11-19-vorschlag-schneller-einstieg.md`.
 - Offen: Sofort-Einstieg aus frischen Meldungen (SEC im Sekundentakt, später RTPR), Dossiers mit den
   Erwartungen vor Quartalszahlen, zweite Meinung des starken Modells, abendliche Prüfung jeder
   Ausführung gegen den echten Umsatz, Alpacas Nachrichtenstrom aus dem Handel nehmen (ab 23.11.).
-- Offene Entscheidungen bei Josh: Start von RTPR am 23.11. oder 30.11. (geplant wird mit dem 30.11.)
-  und Alpacas Echtzeit-Kurse des gesamten Marktes für 99 $ im Monat. Ohne dieses Datenpaket ist vor
-  und nach der Börse kein Handel möglich: Am 19.11. um 8:34 Uhr New Yorker Zeit zeigte die kostenlose
-  Kursquelle bei 1 von 16 Aktien einen brauchbaren Kurs (`tools/ext_check.py`). `[extended]` erst
-  einschalten, wenn das Paket gebucht ist und `ext_check.py` es bestätigt.
+- Offene Entscheidung bei Josh: Start von RTPR am 23.11. oder 30.11. (geplant wird mit dem 30.11.).
+- Kurse vor und nach der Börse: Die kostenlose Kursquelle ist dort fast blind (19.11., 8:34 Uhr New
+  Yorker Zeit: bei 1 von 16 Aktien ein brauchbarer Kurs, `tools/ext_check.py`). Alpacas Echtzeit-Kurse
+  kosten 99 $ im Monat; Josh will zuerst ohne sie testen. Das geht: Ein Versuch am 19.11.
+  (`tools/price_probe.py`) zeigte, dass das Paper-Konto zum echten Kurs ausführt und den Kurs einer
+  offenen Position alle zwei Sekunden nach dem echten Markt bewertet. Der Bot soll deshalb vor und
+  nach der Börse den Kurs der eigenen Position für Stop und Ziel nehmen und beim Einstieg ein Limit
+  setzen, das von einem Kurs vor der Meldung ausgeht. Das ist NOCH NICHT gebaut: `bot/executor.py`
+  stützt sich bisher auf die Kursquelle und würde dort blind aussteigen. Einzelheiten:
+  `memory/strategy.md`, „Das Paper-Konto kennt den echten Kurs“.
 - Finnhub (kostenloses Konto, Schlüssel seit 19.11. auf dem Server) liefert im Ergebniskalender die
   Erwartungen für rund vier von fünf Berichten handelbarer Firmen; Schätzungen kommender Quartale,
   Kursziele und Hoch-/Herabstufungen sind gesperrt.

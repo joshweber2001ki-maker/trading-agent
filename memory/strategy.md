@@ -336,6 +336,36 @@ Börse steht die Messung noch aus; sie läuft ab dem Abend des 19.11. alle fünf
 (`feed_view` im Protokoll: zwanzig sehr liquide Aktien und die Aktien mit einer Meldung in der
 letzten Stunde).
 
+**Andere Kursquellen (geprüft am 19.11., 8:52 Uhr New Yorker Zeit, `tools/price_check.py`):**
+Finnhubs normale Kursabfrage liefert vor Börsenbeginn nur den Schlusskurs des Vortags. Finnhubs
+Live-Strom kommt ohne Verzögerung, zeigt aber nur einen Ausschnitt des Handels: in 25 Sekunden
+Abschlüsse bei 3 von 16 Aktien (Nvidia, AMD, Walmart). Andere Anbieter mit Echtzeit-Kursen des
+gesamten Marktes kosten mehr als Alpacas 99 $ (Databento und Massive je 199 $ im Monat);
+günstigere liefern nur einzelne Börsen.
+
+**Das Paper-Konto kennt den echten Kurs (Versuch am 19.11., 9:00 Uhr New Yorker Zeit,
+`tools/price_probe.py`, von Josh gestartet):** 1 Nvidia-Aktie gekauft, eine Minute gehalten,
+verkauft.
+- Der Kauf mit Limit 157,35 wurde zu 152,78 ausgeführt, der Verkauf zu 152,77: Das Paper-Konto
+  führt zum echten Brief- und Geldkurs aus, nicht zum Limit.
+- Den Kurs der Position meldete der Broker alle zwei Sekunden neu: 23 Änderungen in einer
+  Minute, zwischen 152,69 und 152,85. Die kostenlose Kursquelle sah in derselben Minute keinen
+  einzigen Handel (152,77, am Ende 66 Sekunden alt). Finnhubs Strom zeigte 4 Abschlüsse, zuletzt
+  152,82, passend zum letzten Kurs der Position.
+- Folgerung: Vor und nach der Börse braucht der Bot das bezahlte Datenpaket nicht, um eine
+  offene Position zu überwachen. Er nimmt den Kurs, mit dem der Broker die Position bewertet
+  (`current_price` der Position; die Abfrage macht er ohnehin alle zwei Sekunden). Für den
+  Einstieg genügt ein Limit, das von einem Kurs vor der Meldung ausgeht: Die Order wird zum
+  echten Kurs ausgeführt oder gar nicht, wenn der Kurs schon weiter gelaufen ist, als die
+  Regel „nicht hinterherlaufen“ erlaubt. Als Kurs vor der Meldung taugen die Kurse des gesamten
+  Marktes, die der Broker kostenlos herausgibt, sobald sie 15 Minuten alt sind.
+- Was ohne Datenpaket fehlt: Vor dem Einstieg sieht der Bot weder die Spanne zwischen Geld- und
+  Briefkurs noch, ob der Kurs schon gegen die Bewertung gelaufen ist. Beides zeigt sich erst am
+  Ausführungskurs (dann sofort wieder aussteigen) und in der Nachrechnung am Abend.
+- Noch nicht geprüft: ob der Kurs der Position auch vor 8:00 und nach 17:00 Uhr New Yorker Zeit
+  mitläuft (der Versuch lag in der Zeit, in der auch die kleine Börse IEX handelt, hing aber
+  erkennbar nicht an ihr). Der Bot hält bei jedem Trade fest, wie oft sich der Kurs geändert hat.
+
 **Kalender des Brokers (geprüft am 19.11.):** Er nennt Beginn und Ende der erweiterten Handelszeit
 (`session_open` 0400, `session_close` 2000) und am halben Tag 27.11. das Ende 1700. Der 26.11.
 fehlt als Feiertag.
