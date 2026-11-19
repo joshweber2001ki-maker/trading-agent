@@ -21,6 +21,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API. Ein Modell entscheidet (`[llm] model`), weitere bewerten zum Vergleich mit (`shadow`); jedes Modell braucht eine eigene Form der Anfrage |
 | `bot/wires.py` | zweite Nachrichtenquelle: Pressemitteilungen von PR Newswire, Firmenname → Börsenkürzel |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
+| `bot/finnhub.py` | Berichtstermine und Analystenerwartungen (Gewinn je Aktie, Umsatz) von Finnhub, kostenloses Konto; noch nicht im Handel verwendet |
 | `bot/edgar.py` | Liste der Pflichtmitteilungen an die SEC (Formular 8-K) mit Annahmezeit; nur Messung, kein Handel |
 | `bot/speed.py` | Tempo-Messung nach Börsenschluss: Kursverlauf im Sekundentakt nach jeder Meldung; kein Handel |
 | `tools/check.py` | Verbindungstest |
@@ -30,6 +31,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `tools/replay_news.py` | einen vergangenen Tag durch die News-Strategie spielen (braucht beide Schlüssel) |
 | `tools/speed_check.py` | eine einzelne Meldung von Hand nachmessen (braucht Alpaca-Schlüssel) |
 | `tools/llm_check.py` | alle eingestellten Modelle drei Beispielmeldungen bewerten lassen: Antwortzeit, Token, Limits (braucht den Anthropic-Schlüssel) |
+| `tools/finnhub_check.py` | zeigt, was der Finnhub-Schlüssel liefert: Erwartungen im Ergebniskalender, gesperrte Daten (braucht den Finnhub-Schlüssel) |
 | `deploy/` | Installation, Dienste, stündlicher Abgleich mit GitHub |
 | `memory/strategy.md` | die Strategie in Worten, mit Begründung der Startwerte |
 | `logs/` | Protokolle des Servers (werden stündlich vom Server hochgeladen) |
@@ -39,7 +41,8 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 ## Regeln für die Arbeit an diesem Repo
 
 - **Keine Zugangsdaten und keine persönlichen Daten ins Repo.** Schlüssel liegen nur auf dem
-  Server unter `/etc/trading-bot/` (eintragen mit `deploy/set-keys.sh`), ebenso Joshs
+  Server unter `/etc/trading-bot/` (eintragen mit `deploy/set-keys.sh`; der Finnhub-Schlüssel mit
+  `deploy/set-keys.sh finnhub`, das startet den Bot nicht neu), ebenso Joshs
   Kontaktadresse für Abfragen bei der SEC (`sec.env`, `SEC_CONTACT=...`). Werkzeuge, die
   Schlüssel brauchen, laufen auf dem Server: `bash deploy/run-tool.sh tools/<datei>.py ...`. In der Git-Historie stehen noch alte, öffentliche
   Paper-Keys; sie gelten als kompromittiert.

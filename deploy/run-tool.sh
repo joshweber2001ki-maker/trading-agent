@@ -10,4 +10,5 @@ exec systemd-run --quiet --pipe --wait --collect \
   -p EnvironmentFile=/etc/trading-bot/alpaca.env \
   -p EnvironmentFile=-/etc/trading-bot/llm.env \
   -p EnvironmentFile=-/etc/trading-bot/sec.env \
+  -p EnvironmentFile=-/etc/trading-bot/finnhub.env \
   "$APP/.venv/bin/python" "$@"

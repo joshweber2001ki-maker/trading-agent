@@ -1200,3 +1200,56 @@ def test_bot_starts_lists_filings_and_measures_after_the_close_without_trading(t
     assert b.outcomes_day == b.day and not b.executor.trades and set(calls) == {"GET"}
     assert not (tmp_path / "logs" / "trades.jsonl").exists()
 
+
+
+# ── analysts' expectations (Finnhub) ─────────────────────────────────────────
+class FinnhubHttp:
+    """Stands in for Finnhub: answers each call with the next prepared (status, data, headers)."""
+    def __init__(self, *responses):
+        self.responses, self.calls = list(responses), []
+
+    async def get(self, url, params=None, headers=None):
+        self.calls.append((url, params, headers))
+        status, data, hdrs = self.responses.pop(0)
+
+        class R:
+            status_code, headers, text = status, hdrs, json.dumps(data)
+            def json(self): return data
+        return R()
+
+
+def test_expectations_come_from_the_earnings_calendar_and_the_key_stays_out_of_addresses(monkeypatch):
+    from bot import finnhub as fh_mod
+    from bot.finnhub import Finnhub, FinnhubError, calendar_summary
+
+    async def no_sleep(_): return None
+    monkeypatch.setattr(fh_mod.asyncio, "sleep", no_sleep)
+    rows = [
+        {"symbol": "ACME", "date": "2026-11-24", "hour": "amc", "epsEstimate": 1.2, "revenueEstimate": 5.0e9},
+        {"symbol": "TINY", "date": "2026-11-24", "hour": "", "epsEstimate": None, "revenueEstimate": None},
+        {"symbol": "BIGG", "date": "2026-11-25", "hour": "bmo", "epsEstimate": 0.4, "revenueEstimate": None},
+    ]
+
+    async def go(*responses, key="geheim-123"):
+        fh = Finnhub(key, http=FinnhubHttp(*responses))
+        try:
+            return fh, await fh.earnings_calendar("2026-11-24", "2026-11-25"), None
+        except FinnhubError as e:
+            return fh, None, e
+
+    fh, got, err = asyncio.run(go((200, {"earningsCalendar": rows}, {"x-ratelimit-limit": "60"})))
+    assert got == rows and err is None and fh.plan_limit == 60
+    url, params, headers = fh.http.calls[0]
+    assert url.endswith("/calendar/earnings") and params == {"from": "2026-11-24", "to": "2026-11-25"}
+    assert headers == {"X-Finnhub-Token": "geheim-123"} and "geheim" not in url + json.dumps(params)
+    assert calendar_summary(got) == {"entries": 3, "with_eps": 2, "with_revenue": 1, "with_hour": 2,
+                                     "hours": {"amc": 1, "bmo": 1, "unbekannt": 1}}
+    # over the limit once: one more try, then the answer counts
+    fh, got, err = asyncio.run(go((429, {"error": "limit"}, {}), (200, {"earningsCalendar": rows[:1]}, {})))
+    assert got == rows[:1] and len(fh.http.calls) == 2
+    # data that the plan does not include: a clear error that names the call but never the key
+    fh, got, err = asyncio.run(go((403, {"error": "You don't have access to this resource."}, {})))
+    assert got is None and err.status == 403 and "/calendar/earnings" in str(err) and "geheim" not in str(err)
+    # without a key nothing is sent at all
+    fh, got, err = asyncio.run(go(key=""))
+    assert err.status == "no_key" and fh.http.calls == [] and not fh.available
