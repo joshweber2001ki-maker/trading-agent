@@ -791,6 +791,20 @@ def test_speed_measurement_runs_once_per_announcement(tmp_path):
             hit = [x for x in every if a <= parse_ts(x["t"]) <= b]
             return (hit[::-1] if sort == "desc" else hit)[:limit], False
 
+        async def bars_multi(self, symbols, timeframe, start, end, feed=None):
+            self.calls += 1
+            bar = lambda minute, lo, hi, c: {"t": iso(t0 + timedelta(minutes=minute)), "l": lo, "h": hi, "c": c}
+            return {"ACME": [bar(-1, 49.0, 50.0, 50.0), bar(1, 50.5, 51.0, 51.0), bar(10, 51.0, 52.0, 51.5)]}
+
+        async def quotes(self, sym, start, end, limit=1, sort="desc", feed="sip"):
+            self.calls += 1
+            if self.no_quotes:
+                raise RuntimeError("403 subscription does not permit querying quotes")
+            at = datetime.fromisoformat(end)
+            return [{"t": iso(at - timedelta(seconds=2)), "bp": 50.4, "ap": 50.6, "bs": 3, "as": 1}]
+
+        no_quotes = False
+
     class Uni:
         cache = {"ACME": {}, "DEAD": {}}
 
@@ -816,6 +830,26 @@ def test_speed_measurement_runs_once_per_announcement(tmp_path):
     assert rows["w2"]["skipped"] == "no_trade_before" and rows["S1"]["skipped"] == "market_closed"
     done = [x for x in j.recent_events(1) if x["kind"] == "speed_done"]
     assert len(done) == 1 and (done[0]["due"], done[0]["measured"], done[0]["skipped"], done[0]["errors"]) == (3, 1, 2, 0)
+    # the detailed path, once, for the one announcement in a stock that was trading
+    paths = [x for x in j.recent_events(1) if x["kind"] == "news_path"]
+    assert len(paths) == 1 and (paths[0]["ref"], paths[0]["price"]) == ("w1", 50.0)
+    p5 = paths[0]["p5"]
+    assert len(p5) == 60 and (p5[0], p5[6], p5[7], p5[-1]) == (1.0, 1.0, 2.0, 2.0)      # after 5 s, 35 s, 40 s, 300 s
+    assert paths[0]["bars"] == [[60, 1.0, 2.0, 2.0], [600, 2.0, 4.0, 3.0]]             # the minute before t0 is left out
+    assert (paths[0]["bid_5"], paths[0]["ask_5"], paths[0]["ask_size_60"], paths[0]["quote_age_5"]) == (50.4, 50.6, 1, 2.0)
+    pd = [x for x in j.recent_events(1) if x["kind"] == "path_done"]
+    assert len(pd) == 1 and (pd[0]["due"], pd[0]["done"], pd[0]["errors"], pd[0]["quotes"]) == (1, 1, 0, True)
+
+    # quote history refused: one error is logged, the path is kept without bid and offer
+    j2, api2 = Journal(tmp_path / "noquotes"), Api()
+    api2.no_quotes = True
+    j2.event("wire_item", id="w1", symbol="ACME", published=iso(t0), headline="Acme wins contract", source="prnewswire")
+    assert asyncio.run(Speed(api2, CFG["speed"], j2, Uni(), Stats()).run()) == 1
+    rows2 = list(j2.recent_events(1))
+    path = next(x for x in rows2 if x["kind"] == "news_path")
+    assert len(path["p5"]) == 60 and "bid_5" not in path
+    assert [x["where"] for x in rows2 if x["kind"] == "error"] == ["speed_quotes"]
+    assert next(x for x in rows2 if x["kind"] == "path_done")["quotes"] is False
 
 
 def test_speed_statistics_show_what_is_left_for_a_late_entry():
@@ -1087,6 +1121,8 @@ def test_bot_starts_lists_filings_and_measures_after_the_close_without_trading(t
             return []
         if url.endswith("/stocks/bars"):
             return {"bars": {}}
+        if url.endswith("/quotes"):
+            return {"quotes": [{"t": params["end"], "bp": 101.9, "ap": 102.1, "bs": 2, "as": 2}]}
         if url.endswith("/trades"):                                       # 100 before the filing, 102 from one second after
             start, end = parse_ts(params["start"]), parse_ts(params["end"])
             xs = [{"t": iso(t0 + timedelta(seconds=sec)), "p": 102.0 if sec > 0 else 100.0, "s": 100, "c": ["@"]}

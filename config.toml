@@ -124,6 +124,9 @@ enabled         = true
 after_close_min = 25
 lookback_days   = 5      # so weit zurück werden noch nicht gemessene Meldungen nachgeholt
 max_events      = 1500   # höchstens so viele Meldungen pro Lauf
+detail          = true   # zu jeder Meldung in einer gehandelten Aktie den Verlauf genauer festhalten (alle 5 Sekunden
+                         # über 5 Minuten, jede Minute bis 30 Minuten, Geld- und Briefkurs kurz danach), um später
+                         # nachzurechnen, was ein Einstieg mit Stop, Ziel und Zeitlimit gebracht hätte
 
 [llm]
 # Welches Modell die Meldungen bewertet. Entscheidung Josh 17.11.2026: Vom 18. bis 20.11. entscheidet

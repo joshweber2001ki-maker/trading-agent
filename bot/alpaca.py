@@ -177,6 +177,15 @@ class Alpaca:
         ) or {}
         return d.get("trades") or [], bool(d.get("next_page_token"))
 
+    async def quotes(self, symbol, start, end, limit=1, sort="desc", feed="sip"):
+        """Best bid and offer of the whole market between two times, newest first by default
+        (like the trades: free on the basic plan once 15 minutes old)."""
+        d = await self._req(
+            "GET", f"{DATA}/v2/stocks/{symbol}/quotes",
+            params={"start": start, "end": end, "limit": limit, "sort": sort, "feed": feed},
+        ) or {}
+        return d.get("quotes") or []
+
     async def movers(self, top=20):
         return await self._req(
             "GET", f"{DATA}/v1beta1/screener/stocks/movers", params={"top": top}
