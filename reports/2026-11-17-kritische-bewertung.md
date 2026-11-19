@@ -136,6 +136,10 @@ Paper-Ergebnisse sind eine Obergrenze.
   Haiku 5.5 und entscheidet; Haiku und Sonnet 5.5 bewerten jede Meldung zum Vergleich mit.
   Auswertung im Wochenrückblick (Abschnitt „Modellvergleich" der Wochenstatistik). Hintergrund
   und Probelauf in `memory/strategy.md` unter „Modelltest".
+- **V15 ausgearbeitet (19.11.):** `reports/2026-11-19-vorschlag-schneller-einstieg.md` mit fünf
+  Punkten zur Entscheidung (P1 Nachrechnung auf frischen Meldungen, P2 Analystenerwartungen,
+  P3 Handel vor und nach der Börse, P4 RTPR-Test auf 30.11. verschieben – betrifft V14,
+  P5 Alpacas Strom nicht mehr handeln – betrifft V3). Entscheidung von Josh steht aus.
 - Alle übrigen Vorschläge sind offen.
 
 ## Vorschläge (Entscheidung Josh)

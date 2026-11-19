@@ -195,6 +195,26 @@ handelbar eingestuften 0,27 % (5 von 8 richtig). Der Betrag der Bewegung nach 30
 je Wirkungs-Stufe bei 0,3 bis 0,55 %, weit unter dem, was die Stufen bedeuten sollen (1–3 %,
 3–8 %). Die Meldungen erreichen den Bot erst, wenn die Bewegung vorbei ist.
 
+## Zweite Auswertung der Tempo-Messung (19.11.2026)
+
+Nach zwei Läufen (912 Meldungen) steht die Auswertung mit dem Vorschlag für schnellen Einstieg
+und Handel vor und nach der Börse in `reports/2026-11-19-vorschlag-schneller-einstieg.md`.
+Gegenüber der ersten Lesart vom 17.11. hat sich geändert:
+
+- Die SEC-Meldung ist oft nicht der Auslöser. Bei 44 Paaren kam sie im Median acht Minuten
+  nach der Pressemitteilung desselben Unternehmens. Der kostenlose SEC-Feed ersetzt eine
+  schnelle Quelle für Pressemitteilungen nicht.
+- Nach Pressemitteilungen sind 87 % der Bewegung nach zwei Minuten gelaufen (10 Fälle).
+- Ein Teil der Ausschläge ist Rauschen (20 % der Aktien bewegten sich schon vor der Meldung
+  um 1 %, danach 25 %), und dem Kurs der ersten Minute nachzulaufen lag nur in 40 % der Fälle
+  richtig. Die Richtung muss aus dem Inhalt kommen; das ist auf frischen Meldungen noch nicht
+  geprüft.
+- In der ersten Minute werden im Median 50.000 $ gehandelt: Positionen von 5.000 bis 25.000 $.
+
+Seit dem 19.11. hält die Messung zu jeder Meldung in einer gehandelten Aktie zusätzlich den
+Verlauf im Detail fest (`news_path`: alle 5 Sekunden über 5 Minuten, jede Minute bis 30 Minuten,
+Geld- und Briefkurs 5 und 60 Sekunden nach der Meldung).
+
 ## Modelltest 18.–20.11.2026: Opus entscheidet, Haiku und Sonnet laufen mit
 
 Entscheidung Josh vom 17.11.2026: Für den Rest der Woche bewertet Claude Opus 5.5 die Meldungen,

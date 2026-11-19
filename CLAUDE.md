@@ -73,7 +73,8 @@ fest; bis dahin `[llm]` in `config.toml` nicht ändern. Einzelheiten: `memory/st
 - `logs/trades.jsonl` – ein Eintrag je abgeschlossenem Trade
 - `logs/events-JJJJ-MM-TT.jsonl` – alle Entscheidungen: jede zugeordnete Pressemitteilung mit
   Veröffentlichungszeit (`wire_item`), jede SEC-Meldung mit Annahmezeit (`sec_item`), der
-  Kursverlauf im Sekundentakt danach (`news_speed`), bewertete Meldungen (`news_classified`, mit
+  Kursverlauf im Sekundentakt danach (`news_speed`) und im Detail für die Nachrechnung von
+  Einstiegen (`news_path`), bewertete Meldungen (`news_classified`, mit
   `model` = das Modell, dessen Bewertung zählt), die Bewertungen der mitlaufenden Modelle
   (`news_shadow`), Einspringen des Ersatzmodells (`news_fallback`),
   Kursverlauf in Minuten danach (`news_outcome`), abgelehnte Signale mit Grund, Fehler,
