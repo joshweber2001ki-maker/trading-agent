@@ -80,6 +80,10 @@ class Finnhub:
         d = await self.get("/calendar/earnings", **params)
         return (d or {}).get("earningsCalendar") or []
 
+    async def quote(self, symbol: str) -> dict:
+        """Last price of one stock: {"c": price, "t": time of that trade in seconds since 1970, "pc": previous close, ...}."""
+        return await self.get("/quote", symbol=symbol) or {}
+
     async def past_quarters(self, symbol: str) -> list:
         """The last quarters of one company: expected and reported profit per share, newest first."""
         return await self.get("/stock/earnings", symbol=symbol) or []
