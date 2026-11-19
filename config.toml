@@ -148,6 +148,15 @@ detail          = true   # zu jeder Meldung in einer gehandelten Aktie den Verla
                          # über 5 Minuten, jede Minute bis 30 Minuten, Geld- und Briefkurs kurz danach), um später
                          # nachzurechnen, was ein Einstieg mit Stop, Ziel und Zeitlimit gebracht hätte
 
+[feedview]
+# Messung ohne Einfluss auf den Handel: Alle fünf Minuten hält der Bot fest, bei wie vielen Aktien seine
+# Kursquelle gerade einen Kurs zeigt, auf den sich ein Stop stützen könnte (Regel wie in [extended]).
+# Verglichen werden zwanzig sehr liquide Aktien ([orb] static_pool) und die Aktien mit einer Meldung in
+# der letzten Stunde. Das zeigt, zu welchen Zeiten die kostenlose Kursquelle reicht und wann nicht.
+enabled  = true
+every_s  = 300
+max_news = 25
+
 [llm]
 # Welches Modell die Meldungen bewertet. Entscheidung Josh 17.11.2026: Vom 18. bis 20.11. entscheidet
 # Opus; Haiku (bis dahin das entscheidende Modell) und Sonnet bewerten jede Meldung in der Handelszeit

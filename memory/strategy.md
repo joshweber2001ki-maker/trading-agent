@@ -325,6 +325,36 @@ bezahlte Datenpaket gar keine Kurse in Echtzeit: Der Bot würde dort weder einst
 noch einen Stop halten können. Mit kostenlosen Kursen ist der Handel also auf 14:00 bis 15:20 Uhr
 und 22:00 bis 23:00 Uhr deutscher Zeit beschränkt, und auch dort nur, wenn an IEX gerade Kurse stehen.
 
+**Gemessen am 19.11.2026, 8:34 Uhr New Yorker Zeit (vorbörslich, `tools/ext_check.py`):** Von 16
+Aktien zeigte die kostenlose Kursquelle bei einer einzigen (Nvidia) einen Kurs, auf den sich ein
+Stop stützen könnte. Bei Tesla, Apple, AMD, Palantir und Dell war der letzte Handel 7 bis 30 Minuten
+alt und die Spanne zwischen Geld- und Briefkurs rund 10 % weit (Kurse vom Vorabend). Walmart hatte
+an diesem Morgen Quartalszahlen gemeldet: letzter Handel 17 Stunden alt. Zehn weitere ebenso. Die
+Echtzeit-Kurse des gesamten Marktes verweigert der Broker ohne das Datenpaket (Antwort 403). Damit
+ist der Handel vor der Börse ohne das Paket für 99 $ im Monat nicht möglich. Für die Zeit nach der
+Börse steht die Messung noch aus; sie läuft ab dem Abend des 19.11. alle fünf Minuten mit
+(`feed_view` im Protokoll: zwanzig sehr liquide Aktien und die Aktien mit einer Meldung in der
+letzten Stunde).
+
+**Kalender des Brokers (geprüft am 19.11.):** Er nennt Beginn und Ende der erweiterten Handelszeit
+(`session_open` 0400, `session_close` 2000) und am halben Tag 27.11. das Ende 1700. Der 26.11.
+fehlt als Feiertag.
+
+**Finnhub, kostenloses Konto (geprüft am 19.11.):** Der Ergebniskalender für 19. bis 26.11. enthält
+127 Berichte handelbarer Firmen, davon 100 mit erwartetem Gewinn je Aktie, 97 mit erwartetem
+Umsatz, 83 mit Tageszeit (42 vor Börsenbeginn, 41 nach Börsenschluss). Ebenfalls frei: die letzten
+vier Quartale mit Erwartung und Ergebnis, Kennzahlen, Firmenprofil, Empfehlungen. Gesperrt:
+Schätzungen kommender Quartale, Kursziele, Hoch- und Herabstufungen. 60 Anfragen pro Minute. Die
+Werte stehen in der Währung, in der die Firma berichtet (Alibaba und NetEase in Yuan): Das Dossier
+muss die Währung nennen und die Erwartung gegen die letzten Quartale auf Plausibilität prüfen.
+
+**SEC-Liste am 19.11. gestört:** Seit 6:00 Uhr New Yorker Zeit antwortet der Dienst der SEC für
+die Liste neuer Meldungen nicht mehr (Zeitüberschreitung nach 40 Sekunden, von Hand nachgeprüft).
+Andere Adressen der SEC antworten in Zehntelsekunden, der Server ist also nicht gesperrt. Bis
+14:40 Uhr deutscher Zeit ist für den 19.11. keine einzige SEC-Meldung protokolliert. Der Bot holt
+bis zu anderthalb Tage nach, sobald der Dienst wieder antwortet. Folgerung für den Umbau: Diese
+Liste taugt als zweite Quelle und für die Messung, aber nicht als einzige Quelle für den Handel.
+
 **Offen (Stand 19.11.):** Sofort-Einstieg aus SEC-Meldungen und Pressemitteilungen, Dossiers,
 zweite Meinung, Empfang von RTPR, abendliche Prüfung der Ausführungen, Abschnitt in der
 Wochenstatistik. Entscheidungen von Josh: RTPR ab 23.11. oder 30.11.; Echtzeit-Kurse für 99 $.
@@ -388,3 +418,6 @@ Wochenstatistik. Entscheidungen von Josh: RTPR ab 23.11. oder 30.11.; Echtzeit-K
   (`[extended]`): Limit-Orders, Stop und Zeitlimit im Bot, Wächter jede Minute, kein Neustart
   bei offener Position. Ablage für den Finnhub-Schlüssel und `tools/finnhub_check.py`.
   Einzelheiten im Abschnitt „Umbau ab 19.11.2026“.
+- 2026-11-19 (ohne Einfluss auf den Handel, aktiv ab dem Abend): Der Bot hält alle fünf Minuten
+  fest, bei wie vielen Aktien seine Kursquelle einen brauchbaren Kurs zeigt (`feed_view`).
+  `tools/ext_check.py` zeigt dasselbe auf Abruf.

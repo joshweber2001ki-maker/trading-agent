@@ -1126,6 +1126,8 @@ def test_bot_starts_lists_filings_and_measures_after_the_close_without_trading(t
             return []
         if url.endswith("/stocks/bars"):
             return {"bars": {}}
+        if url.endswith("/stocks/snapshots"):                              # the feed measurement, if a session is running
+            return {}
         if url.endswith("/quotes"):
             return {"quotes": [{"t": params["end"], "bp": 101.9, "ap": 102.1, "bs": 2, "as": 2}]}
         if url.endswith("/trades"):                                       # 100 before the filing, 102 from one second after
@@ -1698,6 +1700,8 @@ def test_a_whole_morning_and_evening_out_of_hours_through_the_running_bot(tmp_pa
             self.cancel_alls += 1
             for o in await self.open_orders():
                 await self.cancel(o["id"])
+        async def snapshots(self, symbols):
+            return {s: await self.snapshot(s) for s in symbols}
 
     broker = Broker(Now())
     cfg = json.loads(json.dumps(EXT_ON))
@@ -1773,8 +1777,56 @@ def test_a_whole_morning_and_evening_out_of_hours_through_the_running_bot(tmp_pa
     assert (daily["basis"], daily["equity_start"], daily["trades"], daily["extended"]) == ("day_start", 100000.0, 2, True)
     status = json.loads((tmp_path / "logs" / "status.json").read_text())
     assert status["extended"] is True and status["open_trades"] == []
+    assert kinds["feed_view"] >= 1                                        # the feed measurement runs alongside
 
 
 def await_none(coro):
     """Run a small coroutine of a fake outside the event loop."""
     return asyncio.run(coro)
+
+
+def test_the_bot_notes_how_much_of_the_market_its_price_feed_shows(tmp_path, monkeypatch):
+    from bot import feedview as fv_mod
+    from bot.feedview import FeedView
+    at = datetime.now(timezone.utc)
+    stamp = lambda age_s: (at - timedelta(seconds=age_s)).isoformat().replace("+00:00", "Z")
+    snaps = {
+        "NVDA": {"latestTrade": {"p": 150.0, "t": stamp(3)}, "latestQuote": {"bp": 149.9, "ap": 150.1, "t": stamp(2)}},
+        "TSLA": {"latestTrade": {"p": 390.0, "t": stamp(1300)}, "latestQuote": {"bp": 365.0, "ap": 404.0, "t": stamp(60000)}},
+        "WMT": {"latestTrade": {"p": 127.0, "t": stamp(61000)}, "latestQuote": {"bp": 119.6, "ap": 131.1, "t": stamp(61000)}},
+        "LZB": {"latestTrade": {"p": 31.4, "t": stamp(40)}, "latestQuote": {"bp": 0, "ap": 0}},
+    }
+
+    class Api:
+        feed, asked = "iex", []
+        async def snapshots(self, symbols):
+            self.asked.append(list(symbols))
+            return {s: snaps[s] for s in symbols if s in snaps}
+
+    class U:
+        cache = {"WMT": {}, "LZB": {}, "NVDA": {}, "TSLA": {}}
+
+    sess = FakeSession()
+    sess.ph = "pre"
+    j = Journal(tmp_path)
+    j.event("wire_item", symbol="WMT", id="w1")           # announcements of the last hour ...
+    j.event("sec_item", symbol="LZB", acc="s1")
+    j.event("wire_item", symbol="WMT", id="w2")
+    j.event("wire_item", symbol="NVDA", id="w3")          # ... one of them in the liquid list already
+    j.event("sec_item", symbol="GONE", acc="s2")          # ... and one the bot cannot trade
+    api = Api()
+    fv = FeedView(api, CFG["feedview"], CFG["extended"], j, sess, U(), ["NVDA", "TSLA"])
+
+    async def go():
+        await fv.step()
+        await fv.step()                                    # too soon: nothing happens
+        sess.ph = None
+        fv.last = 0
+        await fv.step()                                    # no session running: nothing happens
+    asyncio.run(go())
+    assert api.asked == [["NVDA", "TSLA", "WMT", "LZB"]]
+    row = [r for r in j.recent_events(1) if r["kind"] == "feed_view"]
+    assert len(row) == 1 and (row[0]["phase"], row[0]["feed"]) == ("pre", "iex")
+    assert row[0]["liquid"] == {"n": 2, "seeing": 1, "trade_60s": 1, "quote_ok": 1}
+    assert row[0]["news"] == {"n": 2, "seeing": 0, "trade_60s": 1, "quote_ok": 0}
+    assert CFG["feedview"]["enabled"] and len(CFG["orb"]["static_pool"]) == 20

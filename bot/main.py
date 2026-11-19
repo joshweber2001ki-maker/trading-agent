@@ -12,6 +12,7 @@ from .alpaca import Alpaca
 from .common import DATA, ROOT, Journal, env, load_config, log, now, spawn
 from .edgar import Edgar
 from .executor import Executor
+from .feedview import FeedView
 from .llm import Classifier
 from .market import Session, StockStats, Universe
 from .news_strategy import OUTCOME_DELAY_MIN, NewsStrategy
@@ -68,6 +69,8 @@ class Bot:
         # Measurement only, no trading: SEC filings as a list, and how fast prices react to announcements.
         self.edgar = Edgar(self.cfg["edgar"], env("SEC_CONTACT", ""), self.universe, self.journal)
         self.speed = Speed(self.api, self.cfg["speed"], self.journal, self.universe, self.news.stock_stats)
+        self.feedview = FeedView(self.api, self.cfg.get("feedview") or {}, self.cfg.get("extended") or {}, self.journal,
+                                 self.session, self.universe, self.cfg["orb"]["static_pool"])
         self.ext = self.cfg.get("extended") or {}
         self.day = None
         self.outcomes_day = None
@@ -140,6 +143,7 @@ class Bot:
                         await self.orb.step()
                     elif self.session.trading_day and now() >= self.session.close:
                         self.after_close()
+                await self.feedview.step()
             except Exception as e:
                 self.errors += 1
                 self.journal.event("error", where="control", error=repr(e)[:300])

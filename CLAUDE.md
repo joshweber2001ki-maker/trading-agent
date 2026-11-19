@@ -23,6 +23,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
 | `bot/finnhub.py` | Berichtstermine und Analystenerwartungen (Gewinn je Aktie, Umsatz) von Finnhub, kostenloses Konto; noch nicht im Handel verwendet |
 | `bot/edgar.py` | Liste der Pflichtmitteilungen an die SEC (Formular 8-K) mit Annahmezeit; nur Messung, kein Handel |
+| `bot/feedview.py` | Messung alle fünf Minuten: bei wie vielen Aktien die Kursquelle des Bots einen brauchbaren Kurs zeigt (`feed_view`); kein Handel |
 | `bot/speed.py` | Tempo-Messung nach Börsenschluss: Kursverlauf im Sekundentakt nach jeder Meldung; kein Handel |
 | `tools/check.py` | Verbindungstest |
 | `tools/guard.py` | Wächter, läuft jede Minute unabhängig vom Bot: schließt kurz vor Börsenschluss alles, falls der Bot es nicht getan hat; mit `[extended]` auch vor dem Ende der Sitzungen vor und nach der Börse und sobald der Bot dort drei Minuten kein Lebenszeichen gibt |
@@ -81,8 +82,18 @@ Messwerten dahinter: `reports/2026-11-19-vorschlag-schneller-einstieg.md`.
 - Offen: Sofort-Einstieg aus frischen Meldungen (SEC im Sekundentakt, später RTPR), Dossiers mit den
   Erwartungen vor Quartalszahlen, zweite Meinung des starken Modells, abendliche Prüfung jeder
   Ausführung gegen den echten Umsatz, Alpacas Nachrichtenstrom aus dem Handel nehmen (ab 23.11.).
-- Offene Entscheidungen bei Josh: Start von RTPR am 23.11. oder 30.11. (geplant wird mit dem 30.11.),
-  Echtzeit-Kurse des gesamten Marktes für 99 $ im Monat (geplant wird vorerst ohne).
+- Offene Entscheidungen bei Josh: Start von RTPR am 23.11. oder 30.11. (geplant wird mit dem 30.11.)
+  und Alpacas Echtzeit-Kurse des gesamten Marktes für 99 $ im Monat. Ohne dieses Datenpaket ist vor
+  und nach der Börse kein Handel möglich: Am 19.11. um 8:34 Uhr New Yorker Zeit zeigte die kostenlose
+  Kursquelle bei 1 von 16 Aktien einen brauchbaren Kurs (`tools/ext_check.py`). `[extended]` erst
+  einschalten, wenn das Paket gebucht ist und `ext_check.py` es bestätigt.
+- Finnhub (kostenloses Konto, Schlüssel seit 19.11. auf dem Server) liefert im Ergebniskalender die
+  Erwartungen für rund vier von fünf Berichten handelbarer Firmen; Schätzungen kommender Quartale,
+  Kursziele und Hoch-/Herabstufungen sind gesperrt.
+- Die SEC-Liste (`bot/edgar.py`) bekam am 19.11. ab 6:00 Uhr New Yorker Zeit keine Antwort mehr vom
+  Dienst der SEC (nur diese eine Adresse; der Server ist nicht gesperrt). Der Bot holt bis zu
+  anderthalb Tage nach, sobald sie wieder antwortet. Vor dem Bau des Sofort-Einstiegs prüfen, ob sie
+  wieder läuft; als alleinige Quelle für den Handel ist sie zu unzuverlässig.
 
 ## Modelltest bis 20.11.2026
 
@@ -104,7 +115,8 @@ fest; bis dahin `[llm]` in `config.toml` nicht ändern. Einzelheiten: `memory/st
   Kursverlauf in Minuten danach (`news_outcome`), abgelehnte Signale mit Grund, Fehler,
   Eingriffe des Wächters (`guard`); bei Trades vor und nach der Börse zusätzlich der Entschluss
   zum Ausstieg (`trade_closing`), jede Ausstiegsorder (`exit_order`) und das Glattstellen zum
-  Sitzungsende (`session_end`)
+  Sitzungsende (`session_end`); alle fünf Minuten, wie viel die Kursquelle zeigt (`feed_view`:
+  je Gruppe `n` Aktien, davon `seeing` mit brauchbarem Kurs)
 - `logs/daily/JJJJ-MM-TT.json` – Tagesabschluss. Das Ergebnis misst gegen den Depotwert zum
   Börsenschluss des Vortags (`basis: last_close`), ein Neustart am Tag ändert daran nichts. Der
   Abschluss vom 17.11.2026 stammt noch von der alten Version und zählt erst ab dem Neustart um
