@@ -22,15 +22,18 @@ poll_s                   = 5     # Prüfintervall für offene Trades
 # und nach Börsenschluss (16:00 bis 20:00 Uhr, also 22:00 bis 2:00 Uhr deutscher Zeit).
 # Dort nimmt der Broker nur einfache Limit-Orders an. Das Kursziel liegt deshalb als Limit-Order beim
 # Broker; Stop, Zeitlimit und Sitzungsende überwacht der Bot selbst und schließt mit Limit-Orders
-# durch den Markt. ABGESCHALTET, bis Josh die Werte freigegeben hat.
-enabled                     = false
+# durch den Markt. Welcher Kurs zählt: der, mit dem der Broker die offene Position selbst bewertet (er folgt
+# auch dort dem ganzen Markt; die kostenlose Kursquelle zeigt dort fast nichts).
+# Eingeschaltet am 19.11.2026 mit Joshs Freigabe (15:17 Uhr), aktiv ab dem Neustart um 22:07 Uhr.
+enabled                     = true
 poll_s                      = 2     # Prüfintervall, solange eine solche Position offen ist
 flatten_before_end_min_pre  = 10    # vorbörslich alles glatt bis 9:20 Uhr New Yorker Zeit (15:20 Uhr deutscher Zeit)
 flatten_before_end_min_post = 15    # nachbörslich alles glatt bis 19:45 Uhr (1:45 Uhr deutscher Zeit)
 no_entry_before_flatten_min = 10    # so lange davor keine neuen Einstiege mehr
-trade_fresh_s               = 10    # ein Handelskurs zählt für Stop und Ziel, wenn er höchstens so alt ist
-max_mark_spread_pct         = 0.6   # sonst zählt die Mitte aus Geld- und Briefkurs, wenn beide höchstens so weit auseinanderliegen
-blind_exit_s                = 60    # so lange ohne verlässlichen Kurs: Position schließen (ein Stop, der nichts sieht, schützt nicht)
+blind_exit_s                = 60    # bewegt sich der Kurs der Position so lange nicht und zeigt auch die Kursquelle nichts:
+                                    # Position schließen (ein Stop, der nichts sieht, schützt nicht)
+trade_fresh_s               = 10    # die Kursquelle zählt dabei, wenn ihr letzter Handel höchstens so alt ist ...
+max_mark_spread_pct         = 0.6   # ... oder Geld- und Briefkurs höchstens so weit auseinanderliegen
 exit_limit_offset_pct       = 0.5   # Ausstiegs-Limit so weit durch den Markt (beim Verkauf unter dem Geldkurs)
 exit_offset_step_pct        = 0.5   # bei jedem weiteren Versuch um so viel weiter
 exit_offset_max_pct         = 5.0
@@ -41,8 +44,10 @@ guard_stale_s               = 180   # der Wächter schließt offene Positionen, 
 # Sofort-Einstieg nach einer frischen Meldung, vor und nach der Börse (braucht [extended]).
 # Der Bot hat dort keinen Kurs in Echtzeit. Er setzt deshalb ein Limit, das vom letzten Kurs VOR der
 # Meldung ausgeht und einen Teil der erwarteten Bewegung zulässt: Das Paper-Konto führt zum echten Kurs
-# aus oder gar nicht. Stop und Ziel zählen ab dem Ausführungskurs. ABGESCHALTET bis zu Joshs Freigabe.
-enabled            = false
+# aus oder gar nicht. Stop und Ziel zählen ab dem Ausführungskurs.
+# Eingeschaltet am 19.11.2026 mit Joshs Freigabe der Werte (15:17 Uhr), aktiv ab dem Neustart um 22:07 Uhr.
+# Erste, schmale Fassung: Quelle ist nur PR Newswire (kommt Minuten zu spät), bewertet wird mit dem Modell aus [llm].
+enabled            = true
 sessions           = ["pre", "post"]   # in der regulären Handelszeit gilt weiter die alte Regel mit Kursbestätigung
 max_age_s          = 300      # so alt darf die Meldung höchstens sein (PR Newswire kommt 1,5 bis 3,5 Minuten verspätet)
 min_surprise       = 7        # KI-Bewertung 0-10

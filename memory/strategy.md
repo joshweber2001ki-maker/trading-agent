@@ -389,6 +389,41 @@ Liste taugt als zweite Quelle und für die Messung, aber nicht als einzige Quell
 zweite Meinung, Empfang von RTPR, abendliche Prüfung der Ausführungen, Abschnitt in der
 Wochenstatistik. Entscheidungen von Josh: RTPR ab 23.11. oder 30.11.; Echtzeit-Kurse für 99 $.
 
+## Erste Fassung im Handel (seit 19.11.2026, 22:07 Uhr deutscher Zeit)
+
+Josh wollte nicht bis Montag warten. Freigabe der Werte: 19.11.2026, 15:17 Uhr. Die erste Fassung ist
+bewusst schmal: nur die Quelle, die schon da ist, und nur ein Modell.
+
+| Baustein | Wert | Wo |
+|---|---|---|
+| Zeiten | vor Börsenbeginn 4:00 bis 9:10 Uhr New Yorker Zeit (10:00 bis 15:10 Uhr deutscher Zeit), nach Börsenschluss 16:00 bis 19:35 Uhr (22:00 bis 1:35 Uhr) | `[fast] sessions`, `[extended]` |
+| Quelle | Pressemitteilungen von PR Newswire (kommen 1,5 bis 3,5 Minuten verspätet) | `bot/wires.py` |
+| Bewertung | das Modell aus `[llm]` (zurzeit Opus), mit vollem Text der Meldung und den Erwartungen von Finnhub, wenn die Firma gestern, heute oder morgen berichtet | `bot/fast.py`, `bot/finnhub.py` |
+| Einstieg | Richtung klar, Überraschung mindestens 7, Sicherheit mindestens 7, Wirkung mindestens 1; Meldung höchstens 300 Sekunden alt, auch noch wenn die Bewertung vorliegt | `[fast]` |
+| Welche Aktien | genau eine Aktie je Meldung, kein Fonds, Kurs ab 5 $, Tagesumsatz ab 3 Mio. $ | `[fast] min_dollar_volume`, `[risk] min_price` |
+| Order | Limit = Kurs vor der Meldung plus die halbe erwartete Bewegung (Wirkung 1: 1 %, 2: 2,5 %, 3: 5 %); nach 15 Sekunden gestrichen | `expected_move_pct`, `chase_frac`, `entry_timeout_s` |
+| Größe | höchstens 10.000 $, kleine Firmen 5.000 $; Risiko 0,25 % des Depots; eine Position zur Zeit | `max_notional`, `max_notional_small`, `risk_pct`, `max_open` |
+| Stop und Ziel | ab dem Ausführungskurs. Stop = Stop der alten Regel für diese Wirkungs-Stufe und Aktie mal 1,5 (höchstens 4 %); Ziel = Stop der alten Regel mal deren Ziel-Faktor | `stop_mult`, `[news.impact.*]` |
+| Sofort raus | wenn der Ausführungskurs zeigt, dass der Kurs seit vor der Meldung schon um die halbe erwartete Bewegung GEGEN die Bewertung gelaufen ist | `chase_frac` |
+| Zeitlimit | 15 Minuten vor Börsenbeginn, 10 Minuten nach Börsenschluss | `[fast.max_hold_min]` |
+| Glatt | 9:20 Uhr und 19:45 Uhr New Yorker Zeit (15:20 und 1:45 Uhr deutscher Zeit) | `[extended]` |
+
+Zwei Abweichungen vom Vorschlag vom Morgen des 19.11., beide wegen der Lage und beide von Josh
+gesehen: Das Höchstalter ist 300 Sekunden statt 20 (die einzige Quelle kommt Minuten zu spät), und
+der Bot prüft vor dem Einstieg weder die Spanne noch eine Gegenbewegung, weil er dort keinen Kurs
+sieht. Das Limit ersetzt die Regel „nicht hinterherlaufen“; die Gegenbewegung zeigt sich am
+Ausführungskurs.
+
+Erwartung: wenige Trades. Nach zwei Minuten sind bei Pressemitteilungen 87 % der Bewegung gelaufen;
+das Limit lässt dann meist keinen Einstieg mehr zu. Diese Fassung prüft vor allem die Technik am
+echten Konto. Jede Bewertung wird protokolliert (`fast_rated`), auch ohne Trade: Zusammen mit dem
+Kursverlauf derselben Meldung aus der Abendmessung zeigt sich, ob die KI die Richtung trifft.
+
+Trockenlauf an echten Meldungen am 19.11. um 15:21 Uhr (`tools/fast_check.py`, keine Order): voller
+Text abrufbar (1.154 bis 8.078 Zeichen), Kurs vor der Meldung gefunden (bei wenig gehandelten Aktien
+vorbörslich ist das der Schlusskurs vom Vortag), Bewertung mit Opus in 1,7 bis 2,8 Sekunden, von der
+Ankunft bis zur Entscheidung 1,8 bis 2,9 Sekunden.
+
 ## Bekannte Schwächen des Tests
 
 - **Papertrading füllt Orders zu günstig aus.** Echte Kursrutscher bei Nachrichten bildet
@@ -451,3 +486,8 @@ Wochenstatistik. Entscheidungen von Josh: RTPR ab 23.11. oder 30.11.; Echtzeit-K
 - 2026-11-19 (ohne Einfluss auf den Handel, aktiv ab dem Abend): Der Bot hält alle fünf Minuten
   fest, bei wie vielen Aktien seine Kursquelle einen brauchbaren Kurs zeigt (`feed_view`).
   `tools/ext_check.py` zeigt dasselbe auf Abruf.
+- 2026-11-19 (Freigabe Josh 15:17 Uhr, aktiv ab dem Neustart um 22:07 Uhr deutscher Zeit): Handel vor
+  und nach der Börse eingeschaltet (`[extended]`, `[fast]`). Sofort-Einstieg aus Pressemitteilungen
+  von PR Newswire, Limit ab dem Kurs vor der Meldung, Stop und Ziel ab dem Ausführungskurs, Kurs der
+  Position vom Broker. Werte im Abschnitt „Erste Fassung im Handel“. Die reguläre Handelszeit und der
+  Modelltest bleiben unverändert.

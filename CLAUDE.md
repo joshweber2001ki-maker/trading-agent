@@ -17,7 +17,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `config.toml` | alle Stellschrauben beider Strategien und der Risikogrenzen |
 | `bot/news_strategy.py` | Meldung → KI-Bewertung → Bestätigung durch Kurs und Volumen → Einstieg |
 | `bot/orb_strategy.py` | Ausbruch aus der Eröffnungsspanne (abgeschaltet seit 17.11.2026) |
-| `bot/executor.py` | Positionsgröße, Risikogrenzen, Order mit Stop und Ziel, Zeitlimit, Glattstellen. Vor und nach der Börse (`[extended]`, abgeschaltet): nur Limit-Orders, Stop und Zeitlimit überwacht der Bot selbst |
+| `bot/executor.py` | Positionsgröße, Risikogrenzen, Order mit Stop und Ziel, Zeitlimit, Glattstellen. Vor und nach der Börse (`[extended]`): nur Limit-Orders; Stop und Zeitlimit überwacht der Bot selbst, am Kurs, mit dem der Broker die offene Position bewertet |
 | `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API. Ein Modell entscheidet (`[llm] model`), weitere bewerten zum Vergleich mit (`shadow`); jedes Modell braucht eine eigene Form der Anfrage |
 | `bot/wires.py` | zweite Nachrichtenquelle: Pressemitteilungen von PR Newswire, Firmenname → Börsenkürzel |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
@@ -72,37 +72,43 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
   und Zielorders beim Broker abgesichert. Positionen vor und nach der Börse haben keinen Stop
   beim Broker; sie schließt dann der Wächter binnen weniger Minuten.
 
-## Umbau seit 19.11.2026 (Auftrag von Josh, noch nichts davon im Handel)
+## Umbau seit 19.11.2026: erste Fassung im Handel ab 19.11., 22:07 Uhr deutscher Zeit
 
 Josh will direkt im Paper-Konto handeln statt weiter nur messen: Meldung so schnell und so gründlich
-wie möglich bewerten, sofort einsteigen, auch vor und nach der Börse. Freigegeben hat er am 19.11.:
-höchstens 10.000 $ je Position, eine Position zur Zeit, Haltezeit höchstens 15 Minuten. Die übrigen
-Werte bekommt er vor dem Start noch einmal vorgelegt; bis dahin bleiben `[extended]` und alles
-Weitere abgeschaltet. Plan und Stand: `memory/strategy.md`, „Umbau ab 19.11.2026“. Vorschlag mit den
-Messwerten dahinter: `reports/2026-11-19-vorschlag-schneller-einstieg.md`.
+wie möglich bewerten, sofort einsteigen, auch vor und nach der Börse. Die Werte der ersten Fassung hat
+er am 19.11.2026 um 15:17 Uhr freigegeben; sie stehen in `config.toml` (`[extended]`, `[fast]`) und in
+Worten in `memory/strategy.md`, „Erste Fassung im Handel“. Jede Änderung daran braucht wieder sein Ja.
 
-- Fertig, abgeschaltet: Handel vor und nach der Börse in `bot/executor.py` (`[extended]`), Wächter
-  dafür, Ablage und Prüfung des Finnhub-Schlüssels.
-- Offen: Sofort-Einstieg aus frischen Meldungen (SEC im Sekundentakt, später RTPR), Dossiers mit den
-  Erwartungen vor Quartalszahlen, zweite Meinung des starken Modells, abendliche Prüfung jeder
-  Ausführung gegen den echten Umsatz, Alpacas Nachrichtenstrom aus dem Handel nehmen (ab 23.11.).
-- Offene Entscheidung bei Josh: Start von RTPR am 23.11. oder 30.11. (geplant wird mit dem 30.11.).
-- Kurse vor und nach der Börse: Die kostenlose Kursquelle ist dort fast blind (19.11., 8:34 Uhr New
-  Yorker Zeit: bei 1 von 16 Aktien ein brauchbarer Kurs, `tools/ext_check.py`). Alpacas Echtzeit-Kurse
-  kosten 99 $ im Monat; Josh will zuerst ohne sie testen. Das geht: Ein Versuch am 19.11.
-  (`tools/price_probe.py`) zeigte, dass das Paper-Konto zum echten Kurs ausführt und den Kurs einer
-  offenen Position alle zwei Sekunden nach dem echten Markt bewertet. Der Bot soll deshalb vor und
-  nach der Börse den Kurs der eigenen Position für Stop und Ziel nehmen und beim Einstieg ein Limit
-  setzen, das von einem Kurs vor der Meldung ausgeht. Das ist NOCH NICHT gebaut: `bot/executor.py`
-  stützt sich bisher auf die Kursquelle und würde dort blind aussteigen. Einzelheiten:
-  `memory/strategy.md`, „Das Paper-Konto kennt den echten Kurs“.
-- Finnhub (kostenloses Konto, Schlüssel seit 19.11. auf dem Server) liefert im Ergebniskalender die
-  Erwartungen für rund vier von fünf Berichten handelbarer Firmen; Schätzungen kommender Quartale,
-  Kursziele und Hoch-/Herabstufungen sind gesperrt.
-- Die SEC-Liste (`bot/edgar.py`) bekam am 19.11. ab 6:00 Uhr New Yorker Zeit keine Antwort mehr vom
-  Dienst der SEC (nur diese eine Adresse; der Server ist nicht gesperrt). Der Bot holt bis zu
-  anderthalb Tage nach, sobald sie wieder antwortet. Vor dem Bau des Sofort-Einstiegs prüfen, ob sie
-  wieder läuft; als alleinige Quelle für den Handel ist sie zu unzuverlässig.
+**Was läuft**
+- Vor Börsenbeginn (10:00 bis 15:20 Uhr deutscher Zeit) und nach Börsenschluss (22:00 bis 1:45 Uhr):
+  `bot/fast.py`. Quelle ist bisher nur PR Newswire, das anderthalb bis dreieinhalb Minuten zu spät
+  kommt. Bewertet wird mit dem Modell aus `[llm]`, mit vollem Text der Meldung und, wenn die Firma
+  gerade berichtet, mit den Erwartungen von Finnhub.
+- Der Bot hat dort keinen Kurs in Echtzeit (die kostenlose Kursquelle zeigt fast nichts, Alpacas
+  Datenpaket für 99 $ im Monat will Josh vorerst nicht). Deshalb: Das Limit geht vom letzten Kurs des
+  gesamten Marktes VOR der Meldung aus (kostenlos, sobald 15 Minuten alt) und lässt die halbe
+  erwartete Bewegung zu; das Paper-Konto führt zum echten Kurs aus oder gar nicht. Stop und Ziel
+  zählen ab dem Ausführungskurs. Die offene Position überwacht der Bot am Kurs, mit dem der Broker
+  sie bewertet (am 19.11. mit `tools/price_probe.py` geprüft: er folgt dem echten Markt).
+- In der regulären Handelszeit gilt weiter die alte Regel mit Kursbestätigung (`bot/news_strategy.py`).
+
+**Was noch fehlt**
+- Schnelle Quelle: RTPR (Pressemitteilungen in unter einer Sekunde, 139 $ im Monat nach sieben
+  Probetagen). Josh hat den Start noch nicht entschieden; geplant wird mit dem 30.11. Ohne sie
+  entstehen wenige Trades, weil der Kurs bei verspäteten Meldungen meist schon gelaufen ist.
+- SEC-Meldungen als zweite Quelle für den Sofort-Einstieg (Text der Anlage holen). Die SEC-Liste
+  bekam am 19.11. ab 6:00 Uhr New Yorker Zeit keine Antwort mehr vom Dienst der SEC (nur diese eine
+  Adresse; der Server ist nicht gesperrt); der Bot holt bis zu anderthalb Tage nach.
+- Dossiers über die Erwartungen hinaus (Prognose der Firma, Kursverlauf davor), zweite Meinung eines
+  zweiten Modells, abendliche Prüfung jeder Ausführung gegen den echten Umsatz, Auswertung der
+  Sofort-Einstiege in der Wochenstatistik, Alpacas Nachrichtenstrom aus dem Handel nehmen (ab 23.11.).
+- Noch nie am echten Konto gelaufen sind: Ziel-Order und ihr Streichen vor dem Ausstieg, Ausstieg bei
+  Stop und Zeitlimit, Leerverkauf vor und nach der Börse. Bei den ersten Trades die Protokolle prüfen.
+
+**Geprüft am 19.11.** (Einzelheiten in `memory/strategy.md`): Kalender des Brokers nennt die erweiterte
+Handelszeit, auch am halben Tag 27.11.; Finnhub (kostenloses Konto) liefert die Erwartungen für rund
+vier von fünf Berichten handelbarer Firmen; der Trockenlauf `tools/fast_check.py` lief an echten
+Meldungen durch (Text, Kurs vor der Meldung, Bewertung in zwei bis drei Sekunden).
 
 ## Modelltest bis 20.11.2026
 
@@ -125,15 +131,22 @@ fest; bis dahin `[llm]` in `config.toml` nicht ändern. Einzelheiten: `memory/st
   Eingriffe des Wächters (`guard`); bei Trades vor und nach der Börse zusätzlich der Entschluss
   zum Ausstieg (`trade_closing`), jede Ausstiegsorder (`exit_order`) und das Glattstellen zum
   Sitzungsende (`session_end`); alle fünf Minuten, wie viel die Kursquelle zeigt (`feed_view`:
-  je Gruppe `n` Aktien, davon `seeing` mit brauchbarem Kurs)
+  je Gruppe `n` Aktien, davon `seeing` mit brauchbarem Kurs); vom Sofort-Einstieg jede Bewertung
+  (`fast_rated`, auch ohne Trade; mit `news_speed` derselben Meldung zeigt sich, ob die Richtung
+  stimmte), nicht bewertete Meldungen mit Grund (`fast_skipped`), Kandidaten ohne Einstieg mit Grund
+  (`fast_rejected`: `too_old`, `no_reference`, `max_open_strategy`, `entry_refused` …) und einmal je
+  Laden die Zahl der Firmen mit Erwartungen (`expectations`)
 - `logs/daily/JJJJ-MM-TT.json` – Tagesabschluss. Das Ergebnis misst gegen den Depotwert zum
   Börsenschluss des Vortags (`basis: last_close`), ein Neustart am Tag ändert daran nichts. Der
   Abschluss vom 17.11.2026 stammt noch von der alten Version und zählt erst ab dem Neustart um
   14:45 UTC; `tools/weekly_stats.py` nimmt für solche Tage den ersten Stand des Tages.
 - Trades vor und nach der Börse tragen in `trades.jsonl` `style: soft` und die Sitzung (`phase`:
-  `pre` oder `post`), dazu `ticks` und `blind_ticks`: wie oft der Bot den Kurs geprüft hat und wie
-  oft er dabei keinen verlässlichen Kurs sah. Ausstiegsgründe dort: `target`, `stop`, `time`,
-  `session_end`, `blind` (eine Minute ohne verlässlichen Kurs), `recheck` (zweite Meinung), `external`.
+  `pre` oder `post`), dazu `ticks`, `price_changes` und `blind_ticks`: wie oft der Bot den Kurs der
+  Position geprüft hat, wie oft er sich geändert hatte und wie oft der Bot gar nichts sah.
+  `signal_price` ist dort der Kurs vor der Meldung, `slippage_pct` also, wie weit der Kurs bis zur
+  Ausführung schon gelaufen war. Ausstiegsgründe: `target`, `stop`, `time`, `session_end`,
+  `moved_against` (schon der Ausführungskurs zeigte, dass der Markt gegen die Bewertung gelaufen
+  war), `blind` (eine Minute ohne Kursänderung und ohne Kurs aus der Kursquelle), `recheck`, `external`.
   Mit `[extended]` zählt der Tagesabschluss ab dem Depotwert zu Beginn des New Yorker Tages
   (`basis: day_start`) und wird erst nach der Abendsitzung geschrieben.
 - Ein Ausstiegsgrund, der auf `_unconfirmed` endet, heißt: Der Bot konnte den Ausstiegskurs nicht

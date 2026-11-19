@@ -18,6 +18,8 @@ from tools.guard import due
 from tools.weekly_stats import build, default_week, markdown, week_of
 
 CFG = load_config()
+# Everything that trades before the open and after the close, switched off - for tests of the rest.
+OFF = {**CFG, "extended": {**CFG["extended"], "enabled": False}, "fast": {**CFG["fast"], "enabled": False}}
 ORB_ON = {**CFG, "orb": {**CFG["orb"], "enabled": True}}   # the strategy's logic is tested whether or not it is switched on
 
 
@@ -1106,6 +1108,7 @@ def test_bot_starts_lists_filings_and_measures_after_the_close_without_trading(t
     for name in ("ANTHROPIC_API_KEY", "APCA_BASE_URL", "APCA_DATA_FEED"):
         monkeypatch.delenv(name, raising=False)
 
+    monkeypatch.setattr(main_mod, "load_config", lambda: json.loads(json.dumps(OFF)))   # nothing here trades out of hours
     t_now = datetime.now(timezone.utc)
     t0 = t_now.replace(hour=15, minute=0, second=0, microsecond=0)        # a filing during a regular session,
     while t0 > t_now - timedelta(hours=1) or t0.weekday() >= 5:           # old enough to be measured
@@ -1268,8 +1271,15 @@ def test_expectations_come_from_the_earnings_calendar_and_the_key_stays_out_of_a
 EXT_ON = {**CFG, "extended": {**CFG["extended"], "enabled": True}}
 
 
-def test_the_new_trading_hours_are_switched_off_until_josh_has_approved_them():
-    assert CFG["extended"]["enabled"] is False
+def test_trading_out_of_hours_runs_with_the_values_josh_approved_on_19_november():
+    ext, fast = CFG["extended"], CFG["fast"]
+    assert ext["enabled"] is True and fast["enabled"] is True
+    assert fast["max_notional"] == 10000 and fast["max_notional_small"] == 5000 and fast["max_open"] == 1
+    assert fast["max_hold_min"] == {"pre": 15, "post": 10} and fast["sessions"] == ["pre", "post"]
+    assert (fast["min_surprise"], fast["min_confidence"], fast["min_impact"], fast["max_age_s"]) == (7, 7, 1, 300)
+    assert fast["expected_move_pct"] == {"1": 2.0, "2": 5.0, "3": 10.0} and fast["chase_frac"] == 0.5
+    assert (fast["stop_mult"], fast["entry_timeout_s"], fast["risk_pct"]) == (1.5, 15, 0.25)
+    assert (ext["flatten_before_end_min_pre"], ext["flatten_before_end_min_post"], ext["no_entry_before_flatten_min"]) == (10, 15, 10)
 
 
 def test_a_trading_day_has_three_sessions_also_on_a_half_day(monkeypatch):
@@ -1315,7 +1325,7 @@ def test_a_trading_day_has_three_sessions_also_on_a_half_day(monkeypatch):
 
 
 def test_which_price_counts_for_a_position_nobody_else_protects():
-    from bot.executor import exit_limit, mark_price, read_quote, spread_pct
+    from bot.executor import exit_limit, exit_reference, mark_price, read_quote, spread_pct
     at = datetime(2026, 11, 23, 13, 0, 30, tzinfo=timezone.utc)
     snap = {"latestTrade": {"p": 50.0, "t": "2026-11-23T13:00:27.123456789Z"},
             "latestQuote": {"bp": 49.9, "ap": 50.1, "t": "2026-11-23T12:58:30Z"}}
@@ -1331,15 +1341,19 @@ def test_which_price_counts_for_a_position_nobody_else_protects():
     for nothing in ({}, None, {"latestTrade": {"p": 50.0}}, {"latestQuote": {"bp": 0, "ap": 50.1}},
                     {"latestQuote": {"bp": 50.2, "ap": 50.1}}):   # no time on the trade, one-sided or crossed quote
         assert mark_price(read_quote(nothing, at), 10, 0.6) is None
-    # closing: a long position is sold below the bid, a short one bought back above the offer, further each time
+    # closing starts from the broker's own price for the position: the feed's quote can be hours old out of hours
     ext = CFG["extended"]
-    assert exit_limit(q, "long", 0, ext) == (round(49.9 * 0.995, 2), 49.9)
-    assert exit_limit(q, "short", 0, ext) == (round(50.1 * 1.005, 2), 50.1)
-    assert exit_limit(q, "long", 2, ext)[0] == round(49.9 * 0.985, 2)
-    assert exit_limit(q, "long", 99, ext)[0] == round(49.9 * 0.95, 2)                 # but never further than the maximum
-    blind = read_quote({"latestTrade": {"p": 48.0, "t": "2026-11-23T12:40:00Z"}}, at)
-    assert exit_limit(blind, "long", 0, ext) == (round(48.0 * 0.995, 2), 48.0)        # without a quote: the last trade
-    assert exit_limit(read_quote({}, at), "long", 0, ext, 47.0)[1] == 47.0 and exit_limit(read_quote({}, at), "long", 0, ext) == (None, None)
+    stale = read_quote({"latestTrade": {"p": 131.0, "t": "2026-11-22T21:00:00Z"},
+                        "latestQuote": {"bp": 130.0, "ap": 132.0, "t": "2026-11-22T21:00:00Z"}}, at)
+    assert exit_reference({"current_price": "124.10"}, stale, "long") == 124.10      # not the stale bid of 130
+    assert exit_reference(None, q, "long") == 49.9 and exit_reference({}, q, "short") == 50.1   # without it: bid / offer
+    assert exit_reference(None, read_quote({"latestTrade": {"p": 48.0, "t": "2026-11-23T12:40:00Z"}}, at), "long") == 48.0
+    assert exit_reference(None, read_quote({}, at), "long", 47.0) == 47.0 and exit_limit(0.0, "long", 0, ext) is None
+    # through the market, and further with every attempt, but never further than the maximum
+    assert exit_limit(124.10, "long", 0, ext) == round(124.10 * 0.995, 2)
+    assert exit_limit(124.10, "short", 0, ext) == round(124.10 * 1.005, 2)
+    assert exit_limit(124.10, "long", 2, ext) == round(124.10 * 0.985, 2)
+    assert exit_limit(124.10, "long", 99, ext) == round(124.10 * 0.95, 2)
 
 
 class ExtBroker(FakeApi):
@@ -1461,7 +1475,7 @@ def test_before_the_open_the_entry_is_a_plain_limit_order_and_the_bot_keeps_the_
     assert not ex.trades and t.target_order_id in api.cancelled          # the take-profit is taken away first
     exit_order = api.orders[t.exit_orders[-1]]["payload"]
     assert (exit_order["side"], exit_order["qty"], exit_order["extended_hours"]) == ("sell", "99", True)
-    assert exit_order["limit_price"] == str(round(98.45 * 0.995, 2))      # half a percent below the bid
+    assert exit_order["limit_price"] == str(round(98.5 * 0.995, 2))       # half a percent below the price of the position
     row = trades_file(tmp)[0]
     assert (row["exit_reason"], row["exit_price"], row["style"], row["phase"]) == ("stop", 98.45, "soft", "pre")
     assert row["pnl"] == round((98.45 - 100.05) * 99, 2) and row["exit_tries"] == 1 and api.market_closes == 0
@@ -1500,7 +1514,7 @@ def test_take_profit_resting_at_the_broker_and_the_time_limit(ext_rig):
     assert [(r["side"], r["exit_reason"]) for r in rows] == [("long", "target"), ("short", "time")]
     assert rows[0]["exit_price"] == 101.55 and rows[0]["pnl"] == round(1.5 * 99, 2)
     assert rows[1]["exit_price"] == 100.05 and rows[1]["pnl"] == round((99.95 - 100.05) * 100, 2)
-    assert api.orders[t2.exit_orders[-1]]["payload"]["limit_price"] == str(round(100.05 * 1.005, 2))
+    assert api.orders[t2.exit_orders[-1]]["payload"]["limit_price"] == str(round(100.0 * 1.005, 2))
 
 
 def test_an_exit_that_does_not_fill_goes_further_through_the_market(ext_rig):
@@ -1521,7 +1535,7 @@ def test_an_exit_that_does_not_fill_goes_further_through_the_market(ext_rig):
         return t
     t = asyncio.run(go())
     limits = [float(api.orders[o]["payload"]["limit_price"]) for o in t.exit_orders]
-    assert limits == [round(97.95 * 0.995, 2), round(97.95 * 0.99, 2), round(97.95 * 0.985, 2)]
+    assert limits == [round(98.0 * 0.995, 2), round(98.0 * 0.99, 2), round(98.0 * 0.985, 2)]
     row = trades_file(tmp)[0]
     assert (row["exit_reason"], row["exit_tries"], row["exit_price"]) == ("stop", 3, 97.95) and not ex.trades
 
@@ -1551,11 +1565,13 @@ def test_the_position_is_judged_by_the_brokers_own_price_and_closed_when_nothing
         for _ in range(6):
             clock["t"] += timedelta(seconds=10)
             await ex.manage()
+        assert t.exit_reason == "blind" and t.exit_tries == 1 and t.id in ex.trades
+        await ex.manage()                                    # the bid is a full percent below: the second, lower order gets there
         return t
     t = asyncio.run(go())
     row = trades_file(tmp)[0]
     assert (row["exit_reason"], row["blind_ticks"], row["price_changes"]) == ("blind", 1, 2) and not ex.trades
-    assert row["exit_price"] == 99.4                         # sold at the (wide) bid
+    assert (row["exit_price"], row["exit_tries"]) == (99.4, 2)   # sold at the (wide) bid
 
 
 FROM_FILL = {"strategy": "fast", "symbol": "ACME", "side": "long", "price": 99.0, "limit_price": 101.475,
@@ -1665,7 +1681,7 @@ def test_entries_out_of_hours_need_the_switch_the_permission_and_enough_time(ext
         sess.ext_mins, sess.ph = 120, None                                     # overnight
         out["night"] = await ex.can_enter("fast", "ACME", extended=True)
         sess.ph = "post"
-        off = Executor(api, CFG, Journal(tmp_path / "off"), sess, FakeUniverse(), root=tmp_path / "off")
+        off = Executor(api, OFF, Journal(tmp_path / "off"), sess, FakeUniverse(), root=tmp_path / "off")
         out["switched_off"] = await off.can_enter("fast", "ACME", extended=True)
         # one position at a time for this strategy
         assert await ex.enter(dict(FAST))
@@ -1715,7 +1731,7 @@ def test_leftovers_and_the_guard_close_with_limit_orders_out_of_hours(ext_rig):
     assert ext_due("post", 12, ext, 20) == "session_end" and ext_due("post", 13, ext, 20) is None
     assert ext_due("post", 60, ext, 181) == "bot_silent" and ext_due("post", 60, ext, None) == "bot_silent"
     assert ext_due("regular", 60, ext, None) is None and ext_due(None, 60, ext, None) is None
-    assert ext_due("pre", 1, CFG["extended"], None) is None    # switched off: the guard leaves these hours alone
+    assert ext_due("pre", 1, OFF["extended"], None) is None    # switched off: the guard leaves these hours alone
     assert status_age_s(tmp) is None
     Journal(tmp).status({"x": 1})
     assert 0 <= status_age_s(tmp) < 5
@@ -1918,11 +1934,6 @@ def test_the_bot_notes_how_much_of_the_market_its_price_feed_shows(tmp_path, mon
 
 # ── immediate entry on a fresh announcement ─────────────────────────────────
 FAST_ON = {**EXT_ON, "fast": {**CFG["fast"], "enabled": True}}
-
-
-def test_the_immediate_entry_is_switched_off_until_josh_has_approved_it():
-    assert CFG["fast"]["enabled"] is False and CFG["fast"]["max_notional"] == 10000 and CFG["fast"]["max_open"] == 1
-    assert max(CFG["fast"]["max_hold_min"].values()) <= 15 and "regular" not in CFG["fast"]["sessions"]
 
 
 def test_full_text_of_a_press_release():

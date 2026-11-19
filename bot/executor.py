@@ -77,14 +77,22 @@ def mark_price(q: dict, trade_fresh_s: float, max_spread_pct: float):
     return None
 
 
-def exit_limit(q: dict, side: str, attempt: int, ext: dict, fallback: float = 0.0):
+def exit_reference(pos, q: dict, side: str, fallback: float = 0.0) -> float:
+    """The price a closing order starts from. First the broker's own price for the position: it
+    follows the whole market at every hour. The free price feed comes second - outside regular
+    hours its quote can be hours old and far from the market, and a limit set from it might
+    never fill, least of all when the price has just collapsed."""
+    return float((pos or {}).get("current_price") or 0) \
+        or (q["bid"] if side == "long" else q["ask"]) or q["last"] or fallback
+
+
+def exit_limit(ref: float, side: str, attempt: int, ext: dict):
     """Limit price for closing a position outside regular hours: through the market, and further
     through it with every attempt. side is the side of the position ("long" is closed by selling)."""
-    ref = (q["bid"] if side == "long" else q["ask"]) or q["last"] or fallback
     if not ref:
-        return None, None
+        return None
     off = min(ext["exit_limit_offset_pct"] + ext["exit_offset_step_pct"] * attempt, ext["exit_offset_max_pct"])
-    return round(ref * (1 - (1 if side == "long" else -1) * off / 100), 2), ref
+    return round(ref * (1 - (1 if side == "long" else -1) * off / 100), 2)
 
 
 async def close_with_limit(api, symbol, ext: dict, journal=None, tries=4) -> bool:
@@ -96,8 +104,8 @@ async def close_with_limit(api, symbol, ext: dict, journal=None, tries=4) -> boo
             return True
         qty = abs(int(float(pos["qty"])))
         side = pos.get("side") or ("short" if float(pos["qty"]) < 0 else "long")
-        q = read_quote(await api.snapshot(symbol))
-        limit, ref = exit_limit(q, side, attempt, ext, float(pos.get("current_price") or 0))
+        ref = exit_reference(pos, read_quote(await api.snapshot(symbol)), side)
+        limit = exit_limit(ref, side, attempt, ext)
         if not limit or qty < 1:
             return False
         o = await api.submit({
@@ -589,8 +597,8 @@ class Executor:
                 t.exit_orders.append(co["id"])
                 self.save()
             return
-        q = await self.quote(t.symbol)
-        limit, ref = exit_limit(q, t.side, t.exit_tries, self.ext, t.entry_price)
+        ref = exit_reference(pos, await self.quote(t.symbol), t.side, t.entry_price)
+        limit = exit_limit(ref, t.side, t.exit_tries, self.ext)
         try:
             o = await self.api.submit({
                 "symbol": t.symbol, "qty": str(left), "side": "sell" if t.side == "long" else "buy",
