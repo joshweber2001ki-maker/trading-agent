@@ -144,8 +144,16 @@ class Trade:
     exit_order_id: str = ""   # the closing order that is working right now
     exit_orders: list = field(default_factory=list)
     exit_tries: int = 0
-    last_price_at: str = ""   # when the bot last saw a price it can rely on
+    last_price_at: str = ""   # when the price of the position last changed (or the feed last showed the market)
+    last_mark: float = 0      # the broker's price for the position at the last check
+    price_changes: int = 0    # how often that price changed while the position was open
     missing: int = 0          # checks in a row at which the broker showed no position
+    # Entries made without a live price feed: the limit starts from a price before the news, and
+    # stop and target are set from the price the order was really filled at.
+    stop_pct: float = 0       # distance of the stop from the fill, in percent
+    target_pct: float = 0     # distance of the target from the fill, in percent
+    ref_price: float = 0      # price before the news
+    max_adverse_pct: float = 0  # filled this far on the wrong side of ref_price: close at once
     ticks: int = 0            # price checks while the position was open ...
     blind_ticks: int = 0      # ... and how many of them found no usable price
 
@@ -295,9 +303,20 @@ class Executor:
         max_notional (smaller size than the general limits), max_open (trades of this strategy at
         a time), limit_offset_pct and entry_timeout_s (how far through the price the entry limit
         sits and how long it may wait).
+
+        Without a live price (before the open, after the close, free data): give limit_price,
+        stop_pct and target_pct instead of stop and target_r. price is then the last price known
+        from before the news; the order is filled at the real market or not at all, and stop and
+        target are set from the fill. ref_price and max_adverse_pct: if the fill shows that the
+        market has already run that far against the trade, it is closed at once.
         """
         strategy, symbol, side = sig["strategy"], sig["symbol"], sig["side"]
-        price, stop = float(sig["price"]), float(sig["stop"])
+        dirn = 1 if side == "long" else -1
+        price = float(sig["price"])
+        from_fill = bool(sig.get("stop_pct"))
+        # Size and risk are worked out for the worst case: filled exactly at the limit.
+        basis = float(sig.get("limit_price") or price) if from_fill else price
+        stop = basis * (1 - dirn * sig["stop_pct"] / 100) if from_fill else float(sig["stop"])
         base = dict(strategy=strategy, symbol=symbol, side=side, price=price)
         phase = self.session.phase()
         soft = phase in ("pre", "post")      # outside regular hours the broker takes no stop and no bracket
@@ -315,8 +334,11 @@ class Executor:
             return reject("not_shortable")
         a = await self.account(max_age=5)
         equity = float(a["equity"])
+        # A short is filled at the limit or above it: count its size from the higher price.
+        size_price = max(basis, price) if from_fill else price
+        size_stop = size_price * (1 - dirn * sig["stop_pct"] / 100) if from_fill else stop
         qty = position_size(
-            equity, price, stop, sig.get("risk_pct") or self.risk["risk_per_trade_pct"],
+            equity, size_price, size_stop, sig.get("risk_pct") or self.risk["risk_per_trade_pct"],
             self.risk["max_position_leverage"],
             equity * self.risk["max_gross_leverage"] - self.gross(),
             float(a["buying_power"]) * 0.95, sig.get("max_notional"),
@@ -324,11 +346,16 @@ class Executor:
         if qty < 1:
             return reject("size_zero", equity=equity, stop=stop)
 
-        dirn = 1 if side == "long" else -1
         dist = abs(price - stop)
         offset = sig.get("limit_offset_pct", self.ex["entry_limit_offset_pct"])
-        limit = round(price * (1 + dirn * offset / 100), 2)
-        target = round(price + dirn * sig["target_r"] * dist, 2)
+        if sig.get("limit_price"):
+            limit = round(float(sig["limit_price"]), 2)
+        else:
+            limit = round(price * (1 + dirn * offset / 100), 2)
+        if from_fill:
+            target = round(basis * (1 + dirn * sig["target_pct"] / 100), 2)   # provisional, reset at the fill
+        else:
+            target = round(price + dirn * sig["target_r"] * dist, 2)
         stop = round(stop, 2)
         tid = f"{strategy}-{symbol}-{uuid.uuid4().hex[:8]}"
         payload = {
@@ -353,6 +380,8 @@ class Executor:
             max_hold_min=sig.get("max_hold_min") or 0, meta=sig.get("meta") or {},
             style="soft" if soft else "bracket", phase=phase or "",
             entry_timeout_s=sig.get("entry_timeout_s") or 0,
+            stop_pct=sig.get("stop_pct") or 0, target_pct=sig.get("target_pct") or 0,
+            ref_price=sig.get("ref_price") or 0, max_adverse_pct=sig.get("max_adverse_pct") or 0,
         )
         self.trades[tid] = t
         self.trades_today += 1
@@ -439,12 +468,24 @@ class Executor:
                 t.entry_price = float(o["filled_avg_price"])
                 t.entry_time = iso(parse_ts(o["filled_at"])) if o.get("filled_at") else iso(now())
                 t.last_price_at = iso(now())
+                if t.stop_pct:
+                    t.stop_price = round(t.entry_price * (1 - t.dirn * t.stop_pct / 100), 2)
+                    t.target_price = round(t.entry_price * (1 + t.dirn * t.target_pct / 100), 2)
+                moved = (t.entry_price - t.ref_price) / t.ref_price * 100 * t.dirn if t.ref_price else 0.0
                 self.save()
                 self.journal.event(
                     "trade_open", id=t.id, symbol=t.symbol, side=t.side, qty=t.qty,
                     entry=t.entry_price, partial=o["status"] != "filled", style=t.style,
+                    stop=t.stop_price, target=t.target_price, moved_from_ref_pct=round(moved, 3),
                 )
-                await self._place_target(t)
+                if t.max_adverse_pct and moved < -t.max_adverse_pct:
+                    # The fill is the first real price the bot sees: the market had already run
+                    # against the trade before it got in. Out again, without waiting for the stop.
+                    t.exit_reason, t.status = "moved_against", "closing"
+                    self.save()
+                    self.journal.event("trade_closing", id=t.id, symbol=t.symbol, reason=t.exit_reason)
+                else:
+                    await self._place_target(t)
             elif o["status"] in DEAD:
                 self.journal.event("no_fill", id=t.id, symbol=t.symbol, status=o["status"])
                 self._drop(t, count=False)
@@ -481,7 +522,8 @@ class Executor:
         if t.target_order_id and (await self.api.order(t.target_order_id))["status"] == "filled":
             return "target"
         held_min = (now() - parse_ts(t.entry_time)).total_seconds() / 60
-        if await self.api.position(t.symbol) is None:
+        pos = await self.api.position(t.symbol)
+        if pos is None:
             # Gone without us: closed by hand, or the target filled this instant. One empty answer
             # right after the entry is not enough to give the position up.
             t.missing += 1
@@ -493,16 +535,26 @@ class Executor:
             return "time"
         if t.exit_request:
             return t.exit_request
-        q = await self.quote(t.symbol)
-        price = self.mark(q)
+        # The price to judge the position by is the broker's own valuation of it: it follows the
+        # whole market also before the open and after the close, where the free price feed shows
+        # next to nothing (measured on 19.11.2026).
+        price = float(pos.get("current_price") or 0)
         t.ticks += 1
-        if price is None:
-            # No price the bot can rely on. A stop that sees nothing protects nothing: after a
-            # while without one the position is closed.
-            t.blind_ticks += 1
-            since = (now() - parse_ts(t.last_price_at or t.entry_time)).total_seconds()
-            return "blind" if since >= self.ext["blind_exit_s"] else None
-        t.last_price_at = iso(now())
+        if price and price != t.last_mark:
+            t.last_mark, t.last_price_at = price, iso(now())
+            t.price_changes += 1
+        quiet_s = (now() - parse_ts(t.last_price_at or t.entry_time)).total_seconds()
+        if not price or quiet_s >= self.ext["blind_exit_s"]:
+            # No price, or one that has not moved for a long while: is it the market that is quiet,
+            # or does the bot not see it? Ask the price feed as a second opinion.
+            seen = self.mark(await self.quote(t.symbol))
+            if seen is None:
+                # A stop that sees nothing protects nothing: close the position.
+                t.blind_ticks += 1
+                if quiet_s >= self.ext["blind_exit_s"]:
+                    return "blind"
+                return None
+            price, t.last_price_at = seen, iso(now())
         if (price - t.stop_price) * t.dirn <= 0:
             return "stop"
         if (price - t.target_price) * t.dirn >= 0:
@@ -657,7 +709,7 @@ class Executor:
     async def _record(self, t: Trade, exit_price: float, reason: str, when=None):
         exit_time = parse_ts(when) if when else now()
         pnl = (exit_price - t.entry_price) * t.qty * t.dirn
-        risk = abs(t.signal_price - t.stop_price) * t.qty
+        risk = (t.entry_price * t.stop_pct / 100 if t.stop_pct else abs(t.signal_price - t.stop_price)) * t.qty
         row = {
             "id": t.id, "strategy": t.strategy, "symbol": t.symbol, "side": t.side, "qty": t.qty,
             "signal_price": t.signal_price, "entry_price": t.entry_price, "exit_price": exit_price,
@@ -670,7 +722,7 @@ class Executor:
             "style": t.style, "phase": t.phase,
         }
         if t.style == "soft":
-            row.update(ticks=t.ticks, blind_ticks=t.blind_ticks, exit_tries=t.exit_tries)
+            row.update(ticks=t.ticks, blind_ticks=t.blind_ticks, price_changes=t.price_changes, exit_tries=t.exit_tries)
         self.journal.trade(row)
         self.journal.event("trade_closed", id=t.id, symbol=t.symbol, pnl=row["pnl"], r=row["r"], reason=reason)
         self._drop(t)

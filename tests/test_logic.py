@@ -963,13 +963,15 @@ def test_rating_reads_the_answer_behind_the_thinking_and_reports_time_and_tokens
 
 class FakeModel:
     """A model with a fixed opinion (or a fixed failure)."""
-    def __init__(self, model, direction="up", error=None, surprise=8):
+    def __init__(self, model, direction="up", error=None, surprise=8, confidence=7, impact=2):
         self.model, self.direction, self.error, self.surprise, self.day_calls = model, direction, error, surprise, 0
+        self.confidence, self.impact, self.asked = confidence, impact, []
 
-    async def rate(self, art, symbols, names=None, stats=None):
+    async def rate(self, art, symbols, names=None, stats=None, context=None, text_chars=1200):
         self.day_calls += 1
+        self.asked.append({"article": art, "context": context, "text_chars": text_chars})
         v = None if self.error else {"symbol": symbols[0], "direction": self.direction, "surprise": self.surprise,
-                                     "impact": 2, "confidence": 7, "category": "guidance", "reason": ""}
+                                     "impact": self.impact, "confidence": self.confidence, "category": "guidance", "reason": ""}
         return {"verdict": v, "error": self.error, "model": self.model, "seconds": 1.5, "tokens_in": 900, "tokens_out": 80}
 
 
@@ -1408,6 +1410,12 @@ class ExtBroker(FakeApi):
     def move(self, price, spread=0.10, last_age_s=1):
         self.last, self.bid, self.ask, self.last_age_s = price, round(price - spread / 2, 2), round(price + spread / 2, 2), last_age_s
 
+    ref = 99.0                # the last price of the whole market that is old enough to be free
+
+    async def last_bar(self, sym, start, end, feed="sip"):
+        self.bar_asked = (start, end, feed)
+        return {"t": self._stamp(20 * 60), "c": self.ref} if self.ref else None
+
 
 @pytest.fixture
 def ext_rig(tmp_path, monkeypatch):
@@ -1518,32 +1526,90 @@ def test_an_exit_that_does_not_fill_goes_further_through_the_market(ext_rig):
     assert (row["exit_reason"], row["exit_tries"], row["exit_price"]) == ("stop", 3, 97.95) and not ex.trades
 
 
-def test_without_a_price_the_position_is_closed_after_a_minute(ext_rig):
+def test_the_position_is_judged_by_the_brokers_own_price_and_closed_when_nothing_is_seen_for_a_minute(ext_rig):
     api, sess, ex, tmp, clock, events = ext_rig
 
     async def go():
         assert await ex.enter(dict(FAST))
         await ex.manage()
         t = next(iter(ex.trades.values()))
-        # the last trade is minutes old and bid and offer are far apart: the bot cannot tell where the price is
-        api.move(100.0, spread=2.0, last_age_s=300)
-        for _ in range(5):
-            clock["t"] += timedelta(seconds=10)
-            await ex.manage()
-        assert t.id in ex.trades and (t.ticks, t.blind_ticks) == (6, 5) and not t.exit_reason
-        api.move(100.0, spread=0.10, last_age_s=300)      # a narrow quote is enough to see again
+        # The free feed is useless here (last trade minutes old, bid and offer far apart). The broker's
+        # price for the position moves all the same, and that is what counts.
+        api.move(100.4, spread=2.0, last_age_s=300)
         clock["t"] += timedelta(seconds=10)
         await ex.manage()
-        assert t.blind_ticks == 5 and not t.exit_reason
-        api.move(100.0, spread=2.0, last_age_s=300)
+        assert (t.price_changes, t.last_mark, t.blind_ticks) == (2, 100.4, 0) and not t.exit_reason
+        for _ in range(5):                                   # then nothing moves for 50 seconds
+            clock["t"] += timedelta(seconds=10)
+            await ex.manage()
+        assert t.id in ex.trades and t.blind_ticks == 0
+        api.move(100.4, spread=0.10, last_age_s=300)         # a minute: the feed is asked, and a narrow quote
+        clock["t"] += timedelta(seconds=10)                  # there says the market is just quiet
+        await ex.manage()
+        assert not t.exit_reason and t.blind_ticks == 0
+        api.move(100.4, spread=2.0, last_age_s=300)          # another minute, and now the feed shows nothing either
         for _ in range(6):
             clock["t"] += timedelta(seconds=10)
             await ex.manage()
         return t
     t = asyncio.run(go())
     row = trades_file(tmp)[0]
-    assert row["exit_reason"] == "blind" and row["blind_ticks"] == 11 and row["ticks"] == 13 and not ex.trades
-    assert row["exit_price"] == 99.0                       # sold at the (wide) bid
+    assert (row["exit_reason"], row["blind_ticks"], row["price_changes"]) == ("blind", 1, 2) and not ex.trades
+    assert row["exit_price"] == 99.4                         # sold at the (wide) bid
+
+
+FROM_FILL = {"strategy": "fast", "symbol": "ACME", "side": "long", "price": 99.0, "limit_price": 101.475,
+             "stop_pct": 1.5, "target_pct": 2.0, "ref_price": 99.0, "max_adverse_pct": 2.5, "max_hold_min": 10,
+             "extended": True, "risk_pct": 0.25, "max_notional": 10000, "max_open": 1, "entry_timeout_s": 15,
+             "meta": {"source": "prnewswire"}}
+
+
+def test_entry_without_a_price_feed_limit_from_before_the_news_stop_and_target_from_the_fill(ext_rig):
+    api, sess, ex, tmp, clock, events = ext_rig
+
+    async def fresh(sig, market):
+        ex.cooldown.clear()
+        ex.done_today.clear()
+        clock["t"] += timedelta(minutes=5)
+        api.move(market)
+        assert await ex.enter(dict(sig))
+        t = next(iter(ex.trades.values()))
+        await ex.manage()
+        return t
+
+    async def go():
+        # 1. The stock stood at 99.00 before the news; the bot may pay up to 2.5 % more. The market is at
+        #    100.05: filled there, and stop and target are measured from that price, not from the old one.
+        t = await fresh(FROM_FILL, 100.0)
+        order = api.orders[t.order_id]["payload"]
+        assert (order["limit_price"], order["qty"]) == ("101.47", "98")          # sized for the worst case, the limit
+        assert (t.entry_price, t.stop_price, t.target_price) == (100.05, 98.55, 102.05)
+        assert api.orders[t.target_order_id]["payload"]["limit_price"] == "102.05"
+        assert events("trade_open")[-1]["moved_from_ref_pct"] == round(1.05 / 99 * 100, 3)
+        api.move(98.4)
+        await ex.manage()
+        # 2. The market has already run past the limit: no fill, and the order is withdrawn after 15 seconds.
+        t = await fresh(FROM_FILL, 102.0)
+        assert t.status == "pending"
+        clock["t"] += timedelta(seconds=16)
+        await ex.manage()
+        await ex.manage()
+        assert not ex.trades and events("no_fill")
+        # 3. The market has fallen 3 % since the news although the rating said "up": the fill shows it,
+        #    and the bot gets out at once instead of waiting for the stop.
+        t = await fresh(FROM_FILL, 96.0)
+        assert not ex.trades and not t.target_order_id and t.exit_reason == "moved_against"
+        # 4. Short: sold at the bid, stop above, target below.
+        t = await fresh({**FROM_FILL, "side": "short", "limit_price": 96.525}, 99.4)
+        assert (t.entry_price, t.stop_price, t.target_price) == (99.35, 100.84, 97.36)
+        api.fill(t.target_order_id, 97.36)
+        await ex.manage()
+    asyncio.run(go())
+    rows = trades_file(tmp)
+    assert [(r["side"], r["exit_reason"]) for r in rows] == [("long", "stop"), ("long", "moved_against"), ("short", "target")]
+    assert rows[0]["r"] == round((98.35 - 100.05) * 98 / (100.05 * 0.015 * 98), 2)        # risk counts from the fill
+    assert rows[1]["exit_price"] == 95.95 and rows[1]["signal_price"] == 99.0 and rows[2]["pnl"] == round((99.35 - 97.36) * 101, 2)
+    assert rows[2]["qty"] == 101                             # a short is sized from the price before the news, not from its lower limit
 
 
 def test_session_end_second_opinion_and_a_position_closed_by_hand(ext_rig):
@@ -1704,8 +1770,9 @@ def test_a_whole_morning_and_evening_out_of_hours_through_the_running_bot(tmp_pa
             return {s: await self.snapshot(s) for s in symbols}
 
     broker = Broker(Now())
-    cfg = json.loads(json.dumps(EXT_ON))
+    cfg = json.loads(json.dumps(FAST_ON))
     cfg["execution"]["poll_s"] = cfg["extended"]["poll_s"] = 0.02
+    cfg["fast"]["fetch_text"] = False                # no request to the wire's website from a test
     for part in ("edgar", "wires", "speed"):
         cfg[part]["enabled"] = False
     monkeypatch.setattr(main_mod, "load_config", lambda: cfg)
@@ -1754,8 +1821,22 @@ def test_a_whole_morning_and_evening_out_of_hours_through_the_running_bot(tmp_pa
             await until("pre-market closed out", lambda: seen("session_end") == 1)
             assert not b.executor.trades and not await broker.positions()
             assert not await b.executor.enter(dict(FAST))                 # and nothing new is opened
-            t = datetime.now(timezone.utc)                                # evening: the last minutes after the close
-            s.open, s.close, s.ext_close = t - timedelta(hours=8), t - timedelta(hours=1), t + timedelta(minutes=14)
+            # Evening, an hour after the close: a press release arrives the way the wire delivers it.
+            t = datetime.now(timezone.utc)
+            s.open, s.close, s.ext_close = t - timedelta(hours=8), t - timedelta(hours=1), t + timedelta(hours=3)
+            b.executor.cooldown.clear()
+            b.executor.done_today.clear()
+
+            class Stats:
+                async def get(self, syms):
+                    return {x: {"price": 100.0, "dollar_volume": 5e7, "daily_range_pct": 2.5, "size": "mid-sized"} for x in syms}
+            b.fast.llm, b.fast.stock_stats = FakeModel("claude-opus-5-5", "up"), Stats()
+            await b.on_wire({"id": "prnewswire:e2e", "headline": "Acme raises outlook", "summary": "", "source": "prnewswire",
+                             "symbols": ["ACME"], "url": "", "created_at": iso(t - timedelta(seconds=100))})
+            await until("position from the press release", holding)
+            fast_trade = next(iter(b.executor.trades.values()))
+            assert (fast_trade.strategy, fast_trade.phase, fast_trade.entry_price) == ("fast", "post", 100.05)
+            s.ext_close = datetime.now(timezone.utc) + timedelta(minutes=14)   # the last minutes after the close
             await until("day's summary", lambda: seen("day_end") >= 1)
         finally:
             task.cancel()
@@ -1770,11 +1851,14 @@ def test_a_whole_morning_and_evening_out_of_hours_through_the_running_bot(tmp_pa
     kinds = Counter(r["kind"] for r in rows)
     assert kinds["error"] == 0, [r for r in rows if r["kind"] == "error"]
     trades = trades_file(tmp_path)
-    assert [(r["exit_reason"], r["style"], r["phase"]) for r in trades] == [("stop", "soft", "pre"), ("session_end", "soft", "pre")]
+    assert [(r["exit_reason"], r["style"], r["phase"], r["strategy"]) for r in trades] == [
+        ("stop", "soft", "pre", "fast"), ("session_end", "soft", "pre", "fast"), ("session_end", "soft", "post", "fast")]
+    assert kinds["fast_rated"] == 1 and trades[2]["meta"]["ref_price"] == 99.0 and trades[2]["price_changes"] >= 1
     assert [r["phase"] for r in rows if r["kind"] == "session_end"] == ["pre", "post"]
     assert broker.market_closes == 0 and broker.cancel_alls >= 2 and not await_none(broker.open_orders())
     daily = json.loads((tmp_path / "logs" / "daily" / f"{day}.json").read_text())
-    assert (daily["basis"], daily["equity_start"], daily["trades"], daily["extended"]) == ("day_start", 100000.0, 2, True)
+    assert (daily["basis"], daily["equity_start"], daily["trades"], daily["extended"]) == ("day_start", 100000.0, 3, True)
+    assert daily["fast"] == {"received": 1, "rated": 1, "candidates": 1, "entered": 1}
     status = json.loads((tmp_path / "logs" / "status.json").read_text())
     assert status["extended"] is True and status["open_trades"] == []
     assert kinds["feed_view"] >= 1                                        # the feed measurement runs alongside
@@ -1830,3 +1914,214 @@ def test_the_bot_notes_how_much_of_the_market_its_price_feed_shows(tmp_path, mon
     assert row[0]["liquid"] == {"n": 2, "seeing": 1, "trade_60s": 1, "quote_ok": 1}
     assert row[0]["news"] == {"n": 2, "seeing": 0, "trade_60s": 1, "quote_ok": 0}
     assert CFG["feedview"]["enabled"] and len(CFG["orb"]["static_pool"]) == 20
+
+
+# ── immediate entry on a fresh announcement ─────────────────────────────────
+FAST_ON = {**EXT_ON, "fast": {**CFG["fast"], "enabled": True}}
+
+
+def test_the_immediate_entry_is_switched_off_until_josh_has_approved_it():
+    assert CFG["fast"]["enabled"] is False and CFG["fast"]["max_notional"] == 10000 and CFG["fast"]["max_open"] == 1
+    assert max(CFG["fast"]["max_hold_min"].values()) <= 15 and "regular" not in CFG["fast"]["sessions"]
+
+
+def test_full_text_of_a_press_release():
+    from bot.wires import parse_feed, release_text, to_article
+    page = """<html><head><script>var x = "<p>not this</p>";</script></head><body><nav><p>Menu</p></nav>
+      <section class="release-body container"><div class="col">
+        <p><span class="xn-location">NEW YORK</span>, Nov. 19, 2026 /PRNewswire/ -- Acme Corp (NYSE: ACME) today
+           reported third-quarter revenue of $5.2&nbsp;billion.</p>
+        <table><tr><td><p>1,234</p></td></tr></table>
+        <p>The company raised its full-year outlook.</p><script>track()</script><p> </p>
+      </div></section><footer><p>Cookies</p></footer></body></html>"""
+    text = release_text(page)
+    assert text == ("NEW YORK , Nov. 19, 2026 /PRNewswire/ -- Acme Corp (NYSE: ACME) today reported third-quarter "
+                    "revenue of $5.2 billion. The company raised its full-year outlook.")
+    assert release_text("<html><body><p>Access denied</p></body></html>") == "" and len(release_text(page, 20)) == 20
+    rss = """<rss xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><item><title>Acme Reports</title>
+      <link>https://www.prnewswire.com/news-releases/acme-reports-302000001.html</link>
+      <guid>https://www.prnewswire.com/news-releases/acme-reports-302000001.html</guid>
+      <pubDate>Thu, 19 Nov 2026 21:05:00 +0000</pubDate><description>Acme today...</description>
+      <dc:contributor>Acme Corp</dc:contributor><dc:language>en</dc:language></item></channel></rss>"""
+    art = to_article(parse_feed(rss)[0], NameIndex({"ACME": {"name": "Acme Corp"}}), {"ACME": {}}, "prnewswire", 420)
+    assert art["url"].endswith("acme-reports-302000001.html") and art["symbols"] == ["ACME"]
+
+
+def test_what_analysts_expect_is_put_in_front_of_the_rating(monkeypatch):
+    from bot import finnhub as fh_mod
+    from bot.finnhub import Expectations, Finnhub, expectation_text
+    from bot.llm import Classifier
+    today = datetime(2026, 11, 19).date()
+    cal = {"earningsCalendar": [
+        {"symbol": "ACME", "date": "2026-11-19", "hour": "amc", "quarter": 3, "year": 2026, "epsEstimate": 1.2499, "revenueEstimate": 5.2e9},
+        {"symbol": "ACME", "date": "2026-11-20", "hour": "bmo", "epsEstimate": 9.9, "revenueEstimate": None},
+        {"symbol": "TINY", "date": "2026-11-18", "hour": "", "epsEstimate": None, "revenueEstimate": 41.5e6}]}
+    past = [{"period": "2026-06-30", "actual": 1.1, "estimate": 1.02}, {"period": "2026-03-31", "actual": None, "estimate": 0.9},
+            {"period": "2025-12-31", "actual": 0.8, "estimate": 0.95}]
+
+    async def go():
+        fh = Finnhub("k", http=FinnhubHttp((200, cal, {}), (200, past, {})))
+        exp = Expectations(fh)
+        assert await exp.refresh(today) == 2
+        first = await exp.context("ACME")
+        again = await exp.context("ACME")                       # the earlier quarters are asked for only once
+        return fh, first, again, await exp.context("NONE"), expectation_text(exp.rows["TINY"])
+    fh, first, again, none, tiny = asyncio.run(go())
+    assert first == again and none is None and len(fh.http.calls) == 2
+    assert fh.http.calls[0][1] == {"from": "2026-11-18", "to": "2026-11-20"}
+    assert "ACME reports quarterly results on 2026-11-19 (after the market close), fiscal Q3 2026." in first
+    assert "earnings per share of 1.25 and revenue of 5.20 billion" in first       # today's report, not tomorrow's row
+    assert "2026-06-30: 1.10 against 1.02; 2025-12-31: 0.80 against 0.95." in first and "2026-03-31" not in first
+    assert "revenue of 41.5 million" in tiny and "earnings per share" not in tiny.split("\n")[1] and "time of day not known" in tiny
+    assert asyncio.run(Expectations(Finnhub("")).context("ACME")) is None           # no key: no expectations, no call
+
+    # the rating: expectations and the full text reach the model, and the usual request stays as it was
+    ok = (200, {"content": [{"type": "text", "text": ANSWER}], "usage": {"input_tokens": 1, "output_tokens": 1}}, {})
+    art = {"headline": "Acme Reports", "summary": "Acme today...", "source": "prnewswire", "created_at": "", "text": "T" * 9000}
+
+    async def ask(**kw):
+        c = Classifier("k", CFG["llm"], model="claude-haiku-5-5")
+        c.http = ModelHttp(ok)
+        await c.rate(kw.pop("article", art), ["ACME"], **kw)
+        return c.http.bodies[0]["messages"][0]["content"]
+    plain = asyncio.run(ask(article={k: v for k, v in art.items() if k != "text"}))
+    assert plain.endswith("Headline: Acme Reports\nSummary: Acme today...") and "Known beforehand" not in plain
+    rich = asyncio.run(ask(context=first, text_chars=6000))
+    assert "Known beforehand:\nACME reports quarterly results" in rich and rich.endswith("Text: " + "T" * 6000)
+    assert rich.index("Known beforehand") < rich.index("Headline:")
+
+
+@pytest.fixture
+def fast_rig(ext_rig):
+    from bot.fast import FastStrategy
+    api, sess, ex, tmp, clock, events = ext_rig
+    from bot import fast as fast_mod
+
+    class Uni(FakeUniverse):
+        async def asset(self, s): return {"symbol": s}
+        async def name(self, s): return "Acme Corp"
+        async def is_fund(self, s): return s == "FUND"
+
+    class Stats:
+        size, dollar_volume = "mid-sized", 5e7
+        async def get(self, syms):
+            return {s: {"price": 100.0, "dollar_volume": self.dollar_volume, "daily_range_pct": 2.5, "size": self.size} for s in syms}
+
+    def make(model, cfg=FAST_ON, **kw):
+        return FastStrategy(api, cfg, ex.journal, sess, Uni(), ex, model, stats=Stats(), **kw)
+
+    def article(n=1, age_s=120, sym="ACME", head=None):
+        return {"id": f"prnewswire:{n}", "headline": head or f"Acme raises outlook {n}", "summary": "Acme today...",
+                "source": "prnewswire", "symbols": [sym], "url": "https://www.prnewswire.com/news-releases/x.html",
+                "created_at": iso(clock["t"] - timedelta(seconds=age_s))}
+    return api, sess, ex, tmp, clock, events, make, article, fast_mod
+
+
+def test_fresh_announcement_before_the_open_is_rated_and_bought_at_once(fast_rig, monkeypatch):
+    api, sess, ex, tmp, clock, events, make, article, fast_mod = fast_rig
+    monkeypatch.setattr(fast_mod, "now", lambda: clock["t"])
+    model = FakeModel("claude-opus-5-5", "up")
+
+    class Exp:
+        async def context(self, sym): return "ACME reports quarterly results today."
+
+    async def text(url): return "Full text of the release."
+    fast = make(model, expectations=Exp(), fetch_text=text)
+
+    async def go():
+        await fast.on_article(article())
+        t = next(iter(ex.trades.values()))
+        await ex.manage()
+        return t
+    t = asyncio.run(go())
+    # the model saw the expectations and the full text
+    asked = model.asked[0]
+    assert asked["context"].startswith("ACME reports") and asked["article"]["text"].startswith("Full text") and asked["text_chars"] == 6000
+    # the price before the news was 99.00; "large" news is expected to move the stock 5 %, half of that may be gone
+    order = api.orders[t.order_id]["payload"]
+    assert (order["limit_price"], order["qty"], order["extended_hours"]) == ("101.47", "98", True)
+    assert api.bar_asked[2] == "sip" and parse_ts(api.bar_asked[1]) == clock["t"] - timedelta(minutes=16)
+    # filled at the real offer; stop one and a half times the usual 1 %, target three times 1 %, counted from the fill
+    assert (t.entry_price, t.stop_price, t.target_price, t.max_hold_min, t.strategy) == (100.05, 98.55, 103.05, 15, "fast")
+    assert t.meta["ref_price"] == 99.0 and t.meta["news_to_order_s"] == 120.0 and t.meta["with_expectations"] is True
+    rated = events("fast_rated")[0]
+    assert (rated["symbol"], rated["age_s"], rated["with_text"], rated["model"]) == ("ACME", 120, True, "claude-opus-5-5")
+    assert fast.stats == {"received": 1, "rated": 1, "candidates": 1, "entered": 1}
+
+
+def test_what_the_immediate_entry_leaves_alone(fast_rig, monkeypatch):
+    api, sess, ex, tmp, clock, events, make, article, fast_mod = fast_rig
+    monkeypatch.setattr(fast_mod, "now", lambda: clock["t"])
+    model = FakeModel("claude-opus-5-5", "up")
+    fast = make(model)
+
+    async def go():
+        out = {}
+        async def one(name, art):
+            before = (model.day_calls, len(ex.trades))
+            await fast.on_article(art)
+            out[name] = (model.day_calls - before[0], len(ex.trades) - before[1])
+        await one("stale", article(1, age_s=301))                       # older than five minutes: not even rated
+        await one("fund", article(2, sym="FUND"))
+        await one("noise", article(3, head="Why is Acme stock moving today?"))
+        await one("two_stocks", {**article(4), "symbols": ["ACME", "BETA"]})
+        fast.stock_stats.dollar_volume = 1e6
+        await one("too_small", article(5))
+        fast.stock_stats.dollar_volume = 5e7
+        model.confidence = 6
+        await one("unsure", article(6))                                 # rated, but not sure enough of the direction
+        model.confidence, api.ref = 7, None
+        await one("no_reference", article(7))                           # no price from before the news
+        api.ref = 99.0
+        sess.ph = "regular"
+        await one("regular_hours", article(8))                          # the regular session keeps its old rule
+        sess.ph = "post"
+        fast.stock_stats.size = "small"
+        await one("enters", article(9))
+        await one("same_again", article(9))
+        await one("same_headline", {**article(10), "headline": "Acme raises outlook 9"})
+        await one("second_position", article(11, sym="BETA"))           # one position at a time
+        off = make(model, cfg={**FAST_ON, "fast": {**FAST_ON["fast"], "enabled": False}})
+        before = model.day_calls
+        await off.on_article(article(12, sym="GAMMA"))
+        out["switched_off"] = (model.day_calls - before, 0)
+        return out
+    out = asyncio.run(go())
+    assert out == {"stale": (0, 0), "fund": (0, 0), "noise": (0, 0), "two_stocks": (0, 0), "too_small": (0, 0),
+                   "unsure": (1, 0), "no_reference": (1, 0), "regular_hours": (0, 0), "enters": (1, 1),
+                   "same_again": (0, 0), "same_headline": (0, 0), "second_position": (1, 0), "switched_off": (0, 0)}
+    assert [e["reason"] for e in events("fast_skipped")] == ["stale", "fund", "noise", "too_small"]
+    assert [e["reason"] for e in events("fast_rejected")] == ["no_reference", "max_open_strategy"]
+    t = next(iter(ex.trades.values()))
+    assert api.orders[t.order_id]["payload"]["qty"] == "49" and t.max_hold_min == 10      # small company: 5,000 $; evening: 10 minutes
+    assert len(events("fast_rated")) == 4 and not events("error")
+
+
+def test_a_falling_stock_is_sold_short_and_a_rating_that_arrives_too_late_is_not_traded(fast_rig, monkeypatch):
+    api, sess, ex, tmp, clock, events, make, article, fast_mod = fast_rig
+    monkeypatch.setattr(fast_mod, "now", lambda: clock["t"])
+
+    class Slow(FakeModel):
+        async def rate(self, *a, **kw):
+            clock["t"] += timedelta(seconds=self.takes)
+            return await super().rate(*a, **kw)
+    model = Slow("claude-opus-5-5", "down", impact=3)
+    model.takes = 100
+    fast = make(model)
+
+    async def go():
+        await fast.on_article(article(1, age_s=250))           # 250 s old on arrival, 350 s when the rating is in
+        assert not ex.trades
+        model.takes = 2
+        api.move(98.0)
+        await fast.on_article(article(2, age_s=60))
+        t = next(iter(ex.trades.values()))
+        await ex.manage()
+        return t
+    t = asyncio.run(go())
+    assert [e["reason"] for e in events("fast_rejected")] == ["too_old"]
+    order = api.orders[t.order_id]["payload"]
+    # very large news: 10 % expected, the price may be 5 % below the 99.00 from before the news
+    assert (order["side"], order["limit_price"]) == ("sell", "94.05") and t.side == "short"
+    # stop 2 % x 1.5 = 3 % above the fill, target 2 % x 3 = 6 % below it
+    assert (t.entry_price, t.stop_price, t.target_price) == (97.95, 100.89, 92.07)

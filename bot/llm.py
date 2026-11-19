@@ -162,9 +162,14 @@ class Classifier:
             body.update(max_tokens=3000, thinking={"type": "adaptive"}, output_config={"effort": self.effort})
         return body
 
-    async def rate(self, article: dict, symbols, names=None, stats=None) -> dict:
+    async def rate(self, article: dict, symbols, names=None, stats=None, context=None, text_chars=1200) -> dict:
         """Rate one article. Always returns a dict: verdict (None if it failed), error (None if it worked),
-        model, seconds for the call, tokens_in, tokens_out and the account's rate limits for this model."""
+        model, seconds for the call, tokens_in, tokens_out and the account's rate limits for this model.
+
+        context: what is known beforehand (for example what analysts expect of today's results); it is
+        put in front of the article. An article may carry its full "text"; text_chars limits how much
+        of it (or of the summary) the model gets.
+        """
         out = {"verdict": None, "error": None, "model": self.model, "seconds": None,
                "tokens_in": None, "tokens_out": None, "limits": None}
         if not self.available:
@@ -175,11 +180,13 @@ class Classifier:
         self.day_calls += 1
         names, stats = names or {}, stats or {}
         tickers = "\n".join("- " + self.describe(s, names.get(s), stats.get(s)) for s in symbols)
+        body = article.get("text") or ""
         user = (
             f"Tickers:\n{tickers}\n"
-            f"Source: {article.get('source', '')}\n"
+            + (f"Known beforehand:\n{context}\n" if context else "")
+            + f"Source: {article.get('source', '')}\n"
             f"Published: {article.get('created_at', '')}\nHeadline: {article.get('headline', '')}\n"
-            f"Summary: {(article.get('summary') or '')[:1200]}"
+            + (f"Text: {body[:text_chars]}" if body else f"Summary: {(article.get('summary') or '')[:text_chars]}")
         )
         t0 = time.monotonic()
         try:

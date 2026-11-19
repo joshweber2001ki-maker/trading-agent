@@ -9,10 +9,14 @@ sent in a header, never in the address, so it cannot end up in a log line or an 
 """
 import asyncio
 import time
+from datetime import date, timedelta
 
 import httpx
 
+from .common import ET, now
+
 BASE = "https://finnhub.io/api/v1"
+HOURS = {"bmo": "before the market opens", "amc": "after the market close", "dmh": "during market hours"}
 
 
 class FinnhubError(Exception):
@@ -102,3 +106,93 @@ def calendar_summary(rows) -> dict:
         "with_hour": sum(1 for r in rows if r.get("hour")),
         "hours": dict(sorted(hours.items())),
     }
+
+
+def money(x) -> str:
+    """A revenue figure in words a reader can compare at a glance."""
+    x = float(x)
+    if abs(x) >= 1e9:
+        return f"{x / 1e9:.2f} billion"
+    if abs(x) >= 1e6:
+        return f"{x / 1e6:.1f} million"
+    return f"{x:,.0f}"
+
+
+def expectation_text(row: dict, quarters=None) -> str:
+    """What is known before a company's results, as a few lines for the model that rates the release."""
+    when = HOURS.get(row.get("hour") or "", "time of day not known")
+    lines = [f"{row['symbol']} reports quarterly results on {row.get('date')} ({when})"
+             + (f", fiscal Q{row['quarter']} {row.get('year')}" if row.get("quarter") else "") + "."]
+    eps, rev = row.get("epsEstimate"), row.get("revenueEstimate")
+    if eps is not None or rev is not None:
+        parts = ([f"earnings per share of {eps:.2f}"] if eps is not None else []) \
+            + ([f"revenue of {money(rev)}"] if rev is not None else [])
+        lines.append("Analysts expect " + " and ".join(parts) + " (in the currency the company reports in).")
+    past = [q for q in (quarters or []) if q.get("actual") is not None and q.get("estimate") is not None][:4]
+    if past:
+        lines.append("Earlier quarters, reported against expected earnings per share: " + "; ".join(
+            f"{q.get('period')}: {q['actual']:.2f} against {q['estimate']:.2f}" for q in past) + ".")
+    lines.append("Judge the results in the article against these expectations, and against the company's own "
+                 "outlook if the article gives one. Results in line with expectations are no surprise.")
+    return "\n".join(lines)
+
+
+class Expectations:
+    """What analysts expect of the companies that report around today.
+
+    The calendar is loaded once at the start of the day and every few hours after that (one
+    call). The earlier quarters of a company are fetched when its release arrives, at most once
+    a day per company and never for longer than two seconds, so that a rating is not held up.
+    """
+
+    def __init__(self, finnhub: Finnhub, journal=None, refresh_h: float = 4.0):
+        self.fh, self.journal, self.refresh_s = finnhub, journal, refresh_h * 3600
+        self.rows = {}          # symbol -> calendar row of the report nearest to today
+        self.quarters = {}      # symbol -> earlier quarters
+        self.day = None
+        self.loaded = None      # monotonic time of the last successful load
+
+    async def refresh(self, today: date = None, force=False) -> int:
+        """Load the calendar from yesterday to tomorrow. Returns how many companies it names. Never raises."""
+        if not self.fh.available:
+            return 0
+        if not force and self.loaded is not None and time.monotonic() - self.loaded < self.refresh_s:
+            return len(self.rows)
+        today = today or now().astimezone(ET).date()
+        try:
+            rows = await self.fh.earnings_calendar((today - timedelta(days=1)).isoformat(),
+                                                   (today + timedelta(days=1)).isoformat())
+        except FinnhubError as e:
+            if self.journal:
+                self.journal.event("error", where="expectations", error=str(e)[:200])
+            return len(self.rows)
+        best = {}
+        for r in rows:
+            sym, d = r.get("symbol"), r.get("date") or ""
+            if not sym or not d:
+                continue
+            # several reports of one company in three days do not happen; if they do, the one nearest to today counts
+            old = best.get(sym)
+            if old is None or abs((date.fromisoformat(d) - today).days) < abs((date.fromisoformat(old["date"]) - today).days):
+                best[sym] = r
+        if today != self.day:
+            self.quarters, self.day = {}, today
+        self.rows, self.loaded = best, time.monotonic()
+        if self.journal:
+            self.journal.event("expectations", companies=len(best),
+                               with_eps=sum(1 for r in best.values() if r.get("epsEstimate") is not None),
+                               with_revenue=sum(1 for r in best.values() if r.get("revenueEstimate") is not None))
+        return len(best)
+
+    async def context(self, symbol: str):
+        """The lines for the rating of this company's release, or None if it is not reporting now."""
+        await self.refresh()
+        row = self.rows.get(symbol)
+        if not row:
+            return None
+        if symbol not in self.quarters:
+            try:
+                self.quarters[symbol] = await asyncio.wait_for(self.fh.past_quarters(symbol), timeout=2.0)
+            except (FinnhubError, asyncio.TimeoutError):
+                self.quarters[symbol] = []
+        return expectation_text(row, self.quarters[symbol])

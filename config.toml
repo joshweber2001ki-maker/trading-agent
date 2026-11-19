@@ -37,6 +37,39 @@ exit_offset_max_pct         = 5.0
 exit_retry_s                = 4     # nicht ausgeführten Ausstieg nach dieser Zeit weiter durch den Markt neu senden
 guard_stale_s               = 180   # der Wächter schließt offene Positionen, wenn der Bot so lange kein Lebenszeichen gegeben hat
 
+[fast]
+# Sofort-Einstieg nach einer frischen Meldung, vor und nach der Börse (braucht [extended]).
+# Der Bot hat dort keinen Kurs in Echtzeit. Er setzt deshalb ein Limit, das vom letzten Kurs VOR der
+# Meldung ausgeht und einen Teil der erwarteten Bewegung zulässt: Das Paper-Konto führt zum echten Kurs
+# aus oder gar nicht. Stop und Ziel zählen ab dem Ausführungskurs. ABGESCHALTET bis zu Joshs Freigabe.
+enabled            = false
+sessions           = ["pre", "post"]   # in der regulären Handelszeit gilt weiter die alte Regel mit Kursbestätigung
+max_age_s          = 300      # so alt darf die Meldung höchstens sein (PR Newswire kommt 1,5 bis 3,5 Minuten verspätet)
+min_surprise       = 7        # KI-Bewertung 0-10
+min_confidence     = 7        # KI-Bewertung 0-10
+min_impact         = 1        # mindestens "mittel"
+min_dollar_volume  = 3000000  # Aktien mit weniger Tagesumsatz werden gar nicht erst bewertet
+chase_frac         = 0.5      # so viel der erwarteten Bewegung darf der Kurs schon gelaufen sein (Limit); ebenso weit
+                              # gegen die Bewertung gelaufen = sofort wieder raus
+stop_mult          = 1.5      # der Stop liegt so viel weiter weg als bei der alten Regel
+risk_pct           = 0.25     # Risiko je Trade in Prozent des Depots
+max_notional       = 10000    # höchstens so viele Dollar je Position (Freigabe Josh 19.11.2026)
+max_notional_small = 5000     # bei kleinen Firmen (unter 20 Mio. $ Tagesumsatz)
+max_open           = 1        # eine Position zur Zeit (Freigabe Josh 19.11.2026)
+entry_timeout_s    = 15       # nicht ausgeführten Einstieg nach dieser Zeit streichen
+reference_max_age_h = 96      # so alt darf der Kurs vor der Meldung höchstens sein (übers Wochenende: Schlusskurs vom Freitag)
+fetch_text         = true     # den vollen Text der Pressemitteilung holen (sonst nur Überschrift und Anriss)
+text_chars         = 6000     # so viele Zeichen davon bekommt die KI
+
+[fast.expected_move_pct]      # erwartete Bewegung je Wirkungs-Stufe der KI, in Prozent
+1 = 2.0
+2 = 5.0
+3 = 10.0
+
+[fast.max_hold_min]           # Zeitlimit je Sitzung (Freigabe Josh 19.11.2026: höchstens 15 Minuten)
+pre  = 15
+post = 10
+
 [news]
 enabled                  = true
 max_article_age_s        = 90    # ältere Meldungen aus Alpacas Strom werden nicht mehr gehandelt

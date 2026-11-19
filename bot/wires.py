@@ -6,6 +6,7 @@ so the name is matched against the names of tradable US stocks. Only exact match
 normalisation count: a missed release costs nothing, a wrong ticker would cost a trade.
 """
 import asyncio
+import html
 import re
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
@@ -66,8 +67,20 @@ class NameIndex:
         return self.names.get(normalize(company))
 
 
+def release_text(page: str, limit: int = 12000) -> str:
+    """The running text of a press release from its web page: the paragraphs of the release body,
+    without tables, scripts and navigation. Empty if the page has no recognisable body."""
+    m = re.search(r'<section[^>]*class="[^"]*release-body[^"]*"[^>]*>(.*?)</section>', page, re.S | re.I)
+    if not m:
+        return ""
+    body = re.sub(r"<(script|style|table)\b.*?</\1>", " ", m.group(1), flags=re.S | re.I)
+    paras = [re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", x))).strip()
+             for x in re.findall(r"<p\b[^>]*>(.*?)</p>", body, re.S | re.I)]
+    return " ".join(x for x in paras if x)[:limit]
+
+
 def parse_feed(xml_text: str):
-    """RSS items as dicts: guid, title, summary, company, language, published (datetime)."""
+    """RSS items as dicts: guid, link, title, summary, company, language, published (datetime)."""
     out = []
     root = ET.fromstring(xml_text)
     for it in root.findall("./channel/item"):
@@ -77,6 +90,7 @@ def parse_feed(xml_text: str):
             continue
         out.append({
             "guid": it.findtext("guid") or it.findtext("link") or "",
+            "link": (it.findtext("link") or "").strip(),
             "title": (it.findtext("title") or "").strip(),
             "summary": re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", it.findtext("description") or "")).strip(),
             "company": (it.findtext("dc:contributor", namespaces=NS) or "").strip(),
@@ -101,7 +115,7 @@ def to_article(item: dict, index: NameIndex, universe: dict, source: str, max_ag
     return {
         "id": f"{source}:{item['guid'][-60:]}", "headline": item["title"], "summary": item["summary"],
         "created_at": iso(item["published"]), "symbols": [sym], "source": source,
-        "company": item["company"], "max_age_s": max_age_s,
+        "company": item["company"], "max_age_s": max_age_s, "url": item.get("link") or "",
     }
 
 
@@ -147,6 +161,16 @@ class Wires:
                 self.journal.event("wire_item", id=art["id"], symbol=art["symbols"][0], published=art["created_at"],
                                    headline=art["headline"][:140], source=art["source"], company=art["company"][:60])
                 spawn(self.on_article(art))
+
+    async def fetch_text(self, url: str, timeout_s: float = 4.0) -> str:
+        """The full text of a release from the wire's own page; empty if that fails or takes too long."""
+        if not url.startswith("https://www.prnewswire.com/"):
+            return ""
+        try:
+            r = await asyncio.wait_for(self.http.get(url), timeout=timeout_s)
+            return release_text(r.text) if r.status_code == 200 else ""
+        except Exception:
+            return ""
 
     async def run(self):
         """Poll all feeds round-robin, one request every poll_s / len(feeds) seconds."""

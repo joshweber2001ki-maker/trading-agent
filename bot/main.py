@@ -12,7 +12,9 @@ from .alpaca import Alpaca
 from .common import DATA, ROOT, Journal, env, load_config, log, now, spawn
 from .edgar import Edgar
 from .executor import Executor
+from .fast import FastStrategy
 from .feedview import FeedView
+from .finnhub import Expectations, Finnhub
 from .llm import Classifier
 from .market import Session, StockStats, Universe
 from .news_strategy import OUTCOME_DELAY_MIN, NewsStrategy
@@ -65,7 +67,13 @@ class Bot:
             self.api, self.cfg, self.journal, self.session, self.universe, self.executor, self.llm, self.orb,
             stats=StockStats(self.api), shadows=self.shadows, fallback=self.cfg["llm"].get("fallback"),
         )
-        self.wires = Wires(self.cfg["wires"], self.universe, self.news.on_article, self.journal)
+        self.wires = Wires(self.cfg["wires"], self.universe, self.on_wire, self.journal)
+        # Immediate entry before the open and after the close, with what analysts expect of today's results.
+        self.expectations = Expectations(Finnhub(env("FINNHUB_API_KEY", "")), self.journal)
+        self.fast = FastStrategy(
+            self.api, self.cfg, self.journal, self.session, self.universe, self.executor, self.llm,
+            stats=self.news.stock_stats, expectations=self.expectations, fetch_text=self.wires.fetch_text,
+        )
         # Measurement only, no trading: SEC filings as a list, and how fast prices react to announcements.
         self.edgar = Edgar(self.cfg["edgar"], env("SEC_CONTACT", ""), self.universe, self.journal)
         self.speed = Speed(self.api, self.cfg["speed"], self.journal, self.universe, self.news.stock_stats)
@@ -81,13 +89,19 @@ class Bot:
         self.day_start_equity = None   # account value at the start of the New York day (kept across restarts)
         self.errors = 0
         self.ws_connected = False
-        self.last_status = 0
+        self.last_status = None     # time of the last status file (None: none yet, write at once)
         try:
             self.version = subprocess.run(
                 ["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10
             ).stdout.strip() or "unknown"
         except (OSError, subprocess.SubprocessError):
             self.version = "unknown"
+
+    async def on_wire(self, art: dict):
+        """A press release from the wire: the fast strategy takes it before the open and after the
+        close, the old one during the regular session. Each decides by itself whether it is its turn."""
+        spawn(self.fast.on_article(art))
+        await self.news.on_article(art)
 
     # ── loops ────────────────────────────────────────────────────────────────
     async def news_loop(self):
@@ -147,7 +161,7 @@ class Bot:
             except Exception as e:
                 self.errors += 1
                 self.journal.event("error", where="control", error=repr(e)[:300])
-            if time.monotonic() - self.last_status > 60:
+            if self.last_status is None or time.monotonic() - self.last_status > 60:
                 self.last_status = time.monotonic()
                 try:
                     self.write_status()
@@ -178,6 +192,8 @@ class Bot:
             "llm_available": self.llm.available, "llm_model": self.llm.model, "llm_calls_today": self.llm.day_calls,
             "llm_shadow_calls": {c.model: c.day_calls for c in self.shadows},
             "news": self.news.stats, "wires": self.wires.stats, "edgar": self.edgar.stats,
+            "fast": self.fast.stats, "fast_enabled": bool(self.cfg["fast"]["enabled"]),
+            "expectations": len(self.expectations.rows),
             "orb_stage": self.orb.stage, "orb_pool": len(self.orb.pool), "orb_watching": sorted(self.orb.ranges),
             "open_trades": [
                 {"symbol": t.symbol, "strategy": t.strategy, "side": t.side, "qty": t.qty, "status": t.status}
@@ -214,6 +230,7 @@ class Bot:
         self.errors = 0
         self.executor.start_day(self.day)
         self.news.reset_day()
+        self.fast.reset_day()
         self.orb.reset_day()
         self.wires.reset_day()
         self.edgar.reset_day()
@@ -232,8 +249,10 @@ class Bot:
             equity=self.start_equity, last_equity=float(a.get("last_equity") or 0) or None,
             llm=self.llm.available, llm_model=self.llm.model, llm_shadow=[c.model for c in self.shadows],
             news=self.cfg["news"]["enabled"], orb=self.cfg["orb"]["enabled"],
-            extended=bool(self.ext.get("enabled")),
+            extended=bool(self.ext.get("enabled")), fast=bool(self.cfg["fast"]["enabled"]),
         )
+        if self.cfg["fast"]["enabled"]:
+            spawn(self.expectations.refresh(force=True))
         if self.session.trading_day and now() >= self.session.open:
             # Started mid-session: the opening range is gone, skip ORB today.
             self.orb.stage = "done"
@@ -265,8 +284,16 @@ class Bot:
             "llm_model": self.llm.model, "llm_calls": self.llm.day_calls,
             "llm_shadow_calls": {c.model: c.day_calls for c in self.shadows}, "errors": self.errors,
             "orb_watched": sorted(self.orb.ranges), "orb_traded": sorted(self.orb.fired), "extended": ext,
+            "fast": self.fast.stats,
         }
-        if not (self.journal.dir / "daily" / f"{self.day}.json").exists():  # keep the first summary after a restart
+        path = self.journal.dir / "daily" / f"{self.day}.json"
+        try:
+            before = json.loads(path.read_text()) if path.exists() else None
+        except ValueError:
+            before = None
+        # Keep the first summary after a restart - unless it was written at the regular close by a
+        # version without trading after the close: then the evening is still missing in it.
+        if before is None or (ext and not before.get("extended")):
             self.journal.daily(self.day, summary)
         self.journal.event("day_end", **summary)
 

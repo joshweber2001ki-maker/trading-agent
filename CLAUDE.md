@@ -21,7 +21,8 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API. Ein Modell entscheidet (`[llm] model`), weitere bewerten zum Vergleich mit (`shadow`); jedes Modell braucht eine eigene Form der Anfrage |
 | `bot/wires.py` | zweite Nachrichtenquelle: Pressemitteilungen von PR Newswire, Firmenname → Börsenkürzel |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
-| `bot/finnhub.py` | Berichtstermine und Analystenerwartungen (Gewinn je Aktie, Umsatz) von Finnhub, kostenloses Konto; noch nicht im Handel verwendet |
+| `bot/fast.py` | Sofort-Einstieg vor und nach der Börse (`[fast]`): Pressemitteilung → voller Text und Erwartungen → KI-Bewertung → Limit ab dem Kurs vor der Meldung → Einstieg |
+| `bot/finnhub.py` | Berichtstermine und Analystenerwartungen (Gewinn je Aktie, Umsatz, letzte Quartale) von Finnhub, kostenloses Konto; geht als Vorwissen in die Bewertung des Sofort-Einstiegs |
 | `bot/edgar.py` | Liste der Pflichtmitteilungen an die SEC (Formular 8-K) mit Annahmezeit; nur Messung, kein Handel |
 | `bot/feedview.py` | Messung alle fünf Minuten: bei wie vielen Aktien die Kursquelle des Bots einen brauchbaren Kurs zeigt (`feed_view`); kein Handel |
 | `bot/speed.py` | Tempo-Messung nach Börsenschluss: Kursverlauf im Sekundentakt nach jeder Meldung; kein Handel |
@@ -33,6 +34,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `tools/speed_check.py` | eine einzelne Meldung von Hand nachmessen (braucht Alpaca-Schlüssel) |
 | `tools/llm_check.py` | alle eingestellten Modelle drei Beispielmeldungen bewerten lassen: Antwortzeit, Token, Limits (braucht den Anthropic-Schlüssel) |
 | `tools/ext_check.py` | zeigt, was der Bot vor und nach der Börse vom Markt sieht: Handelszeiten laut Broker, Alter der Kurse, Spanne (nur lesend, braucht Alpaca-Schlüssel) |
+| `tools/fast_check.py` | Trockenlauf des Sofort-Einstiegs an den neuesten echten Pressemitteilungen: Text, Erwartungen, Bewertung, Kurs vor der Meldung, die Order, die er senden WÜRDE. Sendet keine Order (braucht alle Schlüssel, kostet ein paar Cent) |
 | `tools/price_check.py` | vergleicht Kursquellen in diesem Moment: Alpacas kostenlose Quelle gegen Finnhub (Abfrage und Strom); nur lesend |
 | `tools/price_probe.py` | **handelt**: kauft 1 Aktie im Paper-Konto, beobachtet eine Minute den Kurs der Position laut Broker und verkauft wieder. Zeigt, ob das Paper-Konto vor und nach der Börse den echten Kurs kennt. Nur von Josh von Hand zu starten |
 | `tools/finnhub_check.py` | zeigt, was der Finnhub-Schlüssel liefert: Erwartungen im Ergebniskalender, gesperrte Daten (braucht den Finnhub-Schlüssel) |

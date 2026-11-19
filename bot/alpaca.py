@@ -174,6 +174,16 @@ class Alpaca:
             if not tok:
                 return out
 
+    async def last_bar(self, symbol, start, end, feed="sip"):
+        """The newest one-minute bar of one symbol between two times, or None.
+        Whole-market data ("sip") is free on the basic plan once it is 15 minutes old."""
+        d = await self._req(
+            "GET", f"{DATA}/v2/stocks/{symbol}/bars",
+            params={"timeframe": "1Min", "start": start, "end": end, "limit": 1, "sort": "desc", "feed": feed},
+        ) or {}
+        bars = d.get("bars") or []
+        return bars[0] if bars else None
+
     async def trades(self, symbol, start, end, limit=10000, sort="asc", feed="sip"):
         """Individual trades of one symbol between two times, at most `limit` of them.
 
