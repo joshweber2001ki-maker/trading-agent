@@ -1821,7 +1821,7 @@ def test_the_bot_notes_how_much_of_the_market_its_price_feed_shows(tmp_path, mon
         await fv.step()
         await fv.step()                                    # too soon: nothing happens
         sess.ph = None
-        fv.last = 0
+        fv.last = None
         await fv.step()                                    # no session running: nothing happens
     asyncio.run(go())
     assert api.asked == [["NVDA", "TSLA", "WMT", "LZB"]]

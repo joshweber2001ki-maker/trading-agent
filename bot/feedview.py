@@ -32,7 +32,7 @@ class FeedView:
     def __init__(self, api, cfg: dict, ext: dict, journal, session, universe, liquid):
         self.api, self.cfg, self.ext, self.journal = api, cfg, ext, journal
         self.session, self.universe, self.liquid = session, universe, list(liquid)
-        self.last = 0.0
+        self.last = None        # time of the last measurement (None: none yet, measure at once)
 
     def news_symbols(self, minutes=60):
         """Stocks with an announcement in the last hour, newest first, without the liquid list."""
@@ -49,7 +49,9 @@ class FeedView:
     async def step(self):
         """Called from the control loop; does something only every every_s seconds in a running session."""
         phase = self.session.phase()
-        if not self.cfg.get("enabled") or not phase or time.monotonic() - self.last < self.cfg["every_s"]:
+        if not self.cfg.get("enabled") or not phase:
+            return
+        if self.last is not None and time.monotonic() - self.last < self.cfg["every_s"]:
             return
         self.last = time.monotonic()
         try:
