@@ -1,9 +1,9 @@
 {
- "t": "2026-11-19T20:06:49Z",
+ "t": "2026-11-19T21:06:52Z",
  "version": "b9591203e866c0dd5a0e50861ab5c05c8c8e0d6c",
  "day": "2026-11-19",
  "trading_day": true,
- "market_open": true,
+ "market_open": false,
  "news_stream": true,
  "llm_available": true,
  "llm_model": "claude-opus-5-5",
@@ -13,20 +13,20 @@
   "claude-sonnet-5-5": 258
  },
  "news": {
-  "received": 1615,
+  "received": 1651,
   "classified": 258,
   "candidates": 3
  },
  "wires": {
-  "polls": 7041,
-  "items": 1060,
-  "matched": 194,
+  "polls": 7629,
+  "items": 1117,
+  "matched": 221,
   "errors": 0
  },
  "edgar": {
-  "polls": 26,
-  "filings": 119,
-  "matched": 78,
+  "polls": 32,
+  "filings": 125,
+  "matched": 84,
   "errors": 30
  },
  "orb_stage": "idle",
@@ -35,5 +35,5 @@
  "open_trades": [],
  "trades_today": 0,
  "errors_today": 4,
- "flattened": false
+ "flattened": true
 }
