@@ -265,6 +265,70 @@ Was der Vergleich am Ende der Woche zeigen kann und was nicht:
 - Solange jede Meldung erst vom Kurs bestätigt werden muss, fallen Fehlalarme kaum ins Gewicht.
   Wichtig wird die Qualität der Bewertung, wenn der Bot sofort einsteigen soll (Vorschlag V15).
 
+## Umbau ab 19.11.2026: sofort einsteigen, auch vor und nach der Börse
+
+**Auftrag (Josh, 19.11.2026):** nicht eine weitere Woche nur nachrechnen, sondern im Paper-Konto
+handeln. Eine KI soll jede Meldung so schnell und so gründlich wie möglich bewerten, mit möglichst
+vielen Informationen zur Aktie, und der Bot soll die Bewegung der ersten Sekunden mitnehmen. Dem
+Kurs der ersten Minuten hinterherzulaufen hält Josh für falsch; die Messung gibt ihm recht
+(Momentum nach 60 Sekunden: nur 40 % richtig).
+
+**Freigegeben am 19.11.:** höchstens 10.000 $ je Position, eine Position zur Zeit, Haltezeit
+höchstens 15 Minuten. Alle weiteren Werte sieht Josh vor dem Start noch einmal.
+
+**Der Ablauf, wie er werden soll**
+
+1. Vorbereiten: Am Vorabend und am Morgen schreibt das stärkste Modell für jede Firma, die
+   berichtet, ein Dossier: Erwartungen der Analysten (Finnhub), Prognose der Firma und letzte
+   Quartale (SEC), Kursverlauf davor, worauf es ankommt.
+2. Erkennen: RTPR liefert Pressemitteilungen in unter einer Sekunde (kostenpflichtig nach sieben
+   Probetagen). Bis dahin die kostenlosen Quellen: SEC-Feed im Sekundentakt, PR Newswire.
+3. Bewerten: Ein schnelles Modell vergleicht die Meldung mit dem Dossier (ein bis zwei Sekunden).
+4. Handeln: sofort eine Limit-Order, rund drei Sekunden nach der Veröffentlichung.
+5. Nachprüfen: Parallel liest das starke Modell die ganze Meldung und kann den Ausstieg auslösen.
+6. Führen: Ziel, Stop, Zeitlimit von Minuten; vor Sitzungsende ist alles glatt.
+
+Dazu: Alpacas Nachrichtenstrom wird ab 23.11. nicht mehr gehandelt (Stunden zu spät, kein
+Vorhersagewert). Und jeden Abend prüft der Bot zu jedem Trade, ob es zum Ausführungskurs wirklich
+genug Umsatz gab, weil das Paper-Konto in dünnem Handel zu günstig ausführt.
+
+**Was vor und nach der Börse anders ist (gebaut am 19.11., `[extended]`, abgeschaltet)**
+
+- Der Broker nimmt dort nur einfache Limit-Orders an (`extended_hours`), keine Stop-Orders und
+  keine Order mit angehängtem Stop und Ziel. Der Einstieg ist deshalb eine einfache Limit-Order.
+  Das Kursziel liegt nach der Ausführung als Limit-Order beim Broker. Den Stop, das Zeitlimit und
+  das Sitzungsende überwacht der Bot alle zwei Sekunden selbst.
+- Ausstieg: zuerst die Ziel-Order streichen, dann eine Limit-Order 0,5 % durch den Markt (beim
+  Verkauf unter dem Geldkurs). Wird sie in vier Sekunden nicht ausgeführt, geht die nächste
+  0,5 Punkte weiter, bis höchstens 5 %. Eine Market-Order gibt es dort nie: Der Broker würde sie
+  bis zur nächsten Eröffnung liegen lassen.
+- Welcher Kurs zählt: ein Handelskurs der letzten zehn Sekunden, sonst die Mitte aus Geld- und
+  Briefkurs, wenn beide höchstens 0,6 % auseinanderliegen. Hat der Bot eine Minute lang keins von
+  beiden, schließt er die Position (Ausstiegsgrund `blind`). Jeder Trade hält fest, wie oft der
+  Bot blind war. Das ist die Messung für die Frage, ob die Echtzeit-Kurse für 99 $ im Monat nötig sind.
+- Glatt bis 9:20 Uhr New Yorker Zeit (15:20 Uhr deutscher Zeit) und bis 19:45 Uhr (1:45 Uhr);
+  zehn Minuten davor keine neuen Einstiege. An halben Tagen endet die Abendsitzung um 17:00 Uhr
+  New Yorker Zeit, der Bot rechnet das aus dem Kalender des Brokers.
+- In der regulären Handelszeit bekommt auch ein Sofort-Einstieg Stop und Ziel als Orders beim
+  Broker, wie bisher.
+- Wächter: läuft jede Minute. Vor und nach der Börse schließt er alles, wenn der Bot drei Minuten
+  kein Lebenszeichen gegeben hat, und drei Minuten nach der Glattstell-Zeit des Bots.
+- Der Server startet den Bot nie neu, solange eine Position offen ist.
+- Tagesabschluss: Mit Handel am Abend zählt der Tag ab dem Depotwert zu Beginn des New Yorker
+  Tages. Der Wert des Brokers vom Börsenschluss des Vortags würde die Trades des Vorabends
+  doppelt zählen.
+
+**Grenze der kostenlosen Kurse.** Der Bot sieht live nur die Börse IEX. Sie handelt von 8:00 bis
+17:00 Uhr New Yorker Zeit, also 14:00 bis 23:00 Uhr deutscher Zeit, und über sie laufen rund 2,5 %
+des Umsatzes. Von 10:00 bis 14:00 Uhr und von 23:00 bis 2:00 Uhr deutscher Zeit gibt es ohne das
+bezahlte Datenpaket gar keine Kurse in Echtzeit: Der Bot würde dort weder einsteigen (kein Kurs)
+noch einen Stop halten können. Mit kostenlosen Kursen ist der Handel also auf 14:00 bis 15:20 Uhr
+und 22:00 bis 23:00 Uhr deutscher Zeit beschränkt, und auch dort nur, wenn an IEX gerade Kurse stehen.
+
+**Offen (Stand 19.11.):** Sofort-Einstieg aus SEC-Meldungen und Pressemitteilungen, Dossiers,
+zweite Meinung, Empfang von RTPR, abendliche Prüfung der Ausführungen, Abschnitt in der
+Wochenstatistik. Entscheidungen von Josh: RTPR ab 23.11. oder 30.11.; Echtzeit-Kurse für 99 $.
+
 ## Bekannte Schwächen des Tests
 
 - **Papertrading füllt Orders zu günstig aus.** Echte Kursrutscher bei Nachrichten bildet
@@ -320,3 +384,7 @@ Was der Vergleich am Ende der Woche zeigen kann und was nicht:
   deshalb fast null aus statt des echten Verlusts. Die Wochenstatistik gleicht das aus.
 - 2026-11-17 (Entscheidung Josh, aktiv ab 18.11.): Opus 5.5 bewertet und entscheidet, Haiku 5.5
   und Sonnet 5.5 bewerten zum Vergleich mit. Einzelheiten im Abschnitt „Modelltest“.
+- 2026-11-19 (Auftrag Josh; gebaut, aber abgeschaltet): Handel vor und nach der Börse
+  (`[extended]`): Limit-Orders, Stop und Zeitlimit im Bot, Wächter jede Minute, kein Neustart
+  bei offener Position. Ablage für den Finnhub-Schlüssel und `tools/finnhub_check.py`.
+  Einzelheiten im Abschnitt „Umbau ab 19.11.2026“.

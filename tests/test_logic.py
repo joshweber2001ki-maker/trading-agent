@@ -287,9 +287,13 @@ def test_every_matched_release_is_logged_with_its_publication_time(tmp_path):
 # ── simulated broker ─────────────────────────────────────────────────────────
 class FakeSession:
     def __init__(self):
-        self.mins = 200
-    def is_open(self): return True
+        self.mins = 200          # minutes to the regular close
+        self.ph = "regular"      # which session is running: pre, regular, post or None
+        self.ext_mins = 120      # minutes to the end of the pre-market / after-hours session
+    def is_open(self): return self.ph == "regular"
     def to_close_min(self): return self.mins
+    def phase(self): return self.ph
+    def phase_end(self, phase): return ex_mod.now() + timedelta(minutes=self.ext_mins)
 
 
 class FakeUniverse:
@@ -328,6 +332,7 @@ class FakeApi:
                             "filled_at": iso(datetime.now(timezone.utc)), "legs": []}
         return self.orders[oid]
     async def snapshot(self, sym): return {"latestTrade": {"p": self.price}}
+    async def live_snapshot(self, sym): return await self.snapshot(sym)
     async def positions(self): return []
     async def position(self, sym): return None if sym in self.gone else {"symbol": sym}
     async def closed_orders(self, sym, after): return self.manual.get(sym, [])
@@ -1253,3 +1258,523 @@ def test_expectations_come_from_the_earnings_calendar_and_the_key_stays_out_of_a
     # without a key nothing is sent at all
     fh, got, err = asyncio.run(go(key=""))
     assert err.status == "no_key" and fh.http.calls == [] and not fh.available
+
+
+# ── trading before the open and after the close ─────────────────────────────
+EXT_ON = {**CFG, "extended": {**CFG["extended"], "enabled": True}}
+
+
+def test_the_new_trading_hours_are_switched_off_until_josh_has_approved_them():
+    assert CFG["extended"]["enabled"] is False
+
+
+def test_a_trading_day_has_three_sessions_also_on_a_half_day(monkeypatch):
+    from bot import market as mk
+
+    class Cal:
+        def __init__(self, **row): self.row = row
+        async def calendar(self, day, end=None): return [self.row]
+
+    clock = {}
+    monkeypatch.setattr(mk, "now", lambda: clock["t"].astimezone(timezone.utc))
+
+    def phases(day, times, **row):
+        at = lambda hm: datetime.fromisoformat(f"{day}T{hm}:00").replace(tzinfo=ET)
+        clock["t"] = at("03:00")
+        s = mk.Session(Cal(date=day, **row))
+        asyncio.run(s.refresh())
+        out = []
+        for hm in times:
+            clock["t"] = at(hm)
+            out.append(s.phase())
+        return s, out
+
+    s, got = phases("2026-11-23", ("03:59", "04:00", "09:29", "09:30", "15:59", "16:00", "19:59", "20:00"),
+                    open="09:30", close="16:00", session_open="0400", session_close="2000")
+    assert got == [None, "pre", "pre", "regular", "regular", "post", "post", None]
+    assert s.phase_end("pre") == s.open and s.phase_end("post").hour == 20 and s.is_open() is False
+    # the Friday after Thanksgiving: the exchange closes at 13:00, after-hours trading ends four hours
+    # later, whatever the calendar says about the usual end
+    s, got = phases("2026-11-27", ("12:59", "13:00", "16:59", "17:00"),
+                    open="09:30", close="13:00", session_open="0400", session_close="2000")
+    assert got == ["regular", "post", "post", None] and s.ext_close.hour == 17
+    # a calendar without the two fields, or with nonsense in them: 4:00 and four hours after the close
+    s, got = phases("2026-11-23", ("04:00", "19:59"), open="09:30", close="16:00")
+    assert got == ["pre", "post"] and (s.ext_open.hour, s.ext_close.hour) == (4, 20)
+    s, got = phases("2026-11-23", ("04:00",), open="09:30", close="16:00", session_open="1000", session_close="x")
+    assert got == ["pre"] and (s.ext_open.hour, s.ext_close.hour) == (4, 20)
+    # a holiday has no session at all
+    clock["t"] = datetime.fromisoformat("2026-11-26T10:00:00").replace(tzinfo=ET)
+    s = mk.Session(Cal(date="2026-11-27", open="09:30", close="13:00"))     # the calendar answers with the next trading day
+    asyncio.run(s.refresh())
+    assert s.phase() is None and not s.trading_day
+
+
+def test_which_price_counts_for_a_position_nobody_else_protects():
+    from bot.executor import exit_limit, mark_price, read_quote, spread_pct
+    at = datetime(2026, 11, 23, 13, 0, 30, tzinfo=timezone.utc)
+    snap = {"latestTrade": {"p": 50.0, "t": "2026-11-23T13:00:27.123456789Z"},
+            "latestQuote": {"bp": 49.9, "ap": 50.1, "t": "2026-11-23T12:58:30Z"}}
+    q = read_quote(snap, at)
+    assert (q["last"], round(q["last_age_s"]), q["bid"], q["ask"], round(q["quote_age_s"])) == (50.0, 3, 49.9, 50.1, 120)
+    assert round(spread_pct(q), 2) == 0.4
+    assert mark_price(q, 10, 0.6) == 50.0                         # a trade of the last seconds counts first
+    old = read_quote({**snap, "latestTrade": {"p": 48.0, "t": "2026-11-23T12:40:00Z"}}, at)
+    assert mark_price(old, 10, 0.6) == 50.0                       # otherwise the middle of a narrow quote, however old it is
+    wide = read_quote({"latestTrade": snap["latestTrade"] | {"t": "2026-11-23T12:40:00Z"},
+                       "latestQuote": {"bp": 49.0, "ap": 51.0, "t": "2026-11-23T13:00:29Z"}}, at)
+    assert mark_price(wide, 10, 0.6) is None                      # a wide quote and an old trade: the bot is blind
+    for nothing in ({}, None, {"latestTrade": {"p": 50.0}}, {"latestQuote": {"bp": 0, "ap": 50.1}},
+                    {"latestQuote": {"bp": 50.2, "ap": 50.1}}):   # no time on the trade, one-sided or crossed quote
+        assert mark_price(read_quote(nothing, at), 10, 0.6) is None
+    # closing: a long position is sold below the bid, a short one bought back above the offer, further each time
+    ext = CFG["extended"]
+    assert exit_limit(q, "long", 0, ext) == (round(49.9 * 0.995, 2), 49.9)
+    assert exit_limit(q, "short", 0, ext) == (round(50.1 * 1.005, 2), 50.1)
+    assert exit_limit(q, "long", 2, ext)[0] == round(49.9 * 0.985, 2)
+    assert exit_limit(q, "long", 99, ext)[0] == round(49.9 * 0.95, 2)                 # but never further than the maximum
+    blind = read_quote({"latestTrade": {"p": 48.0, "t": "2026-11-23T12:40:00Z"}}, at)
+    assert exit_limit(blind, "long", 0, ext) == (round(48.0 * 0.995, 2), 48.0)        # without a quote: the last trade
+    assert exit_limit(read_quote({}, at), "long", 0, ext, 47.0)[1] == 47.0 and exit_limit(read_quote({}, at), "long", 0, ext) == (None, None)
+
+
+class ExtBroker(FakeApi):
+    """A broker outside regular hours: it takes nothing but plain limit orders marked for extended
+    hours, fills them when they cross the quote (like the paper account), and its positions follow the fills."""
+    def __init__(self, clock):
+        super().__init__()
+        self.clock, self.pos = clock, {}
+        self.bid, self.ask, self.last, self.last_age_s = 99.95, 100.05, 100.0, 1
+        self.auto = True          # fill orders that cross the quote at once
+        self.market_closes = 0    # market orders sent (not possible out of hours)
+        self.seq = 0              # every order gets a later time stamp than the one before
+
+    def _stamp(self, age_s=0):
+        return (self.clock["t"] - timedelta(seconds=age_s)).isoformat().replace("+00:00", "Z")
+
+    async def submit(self, p):
+        assert p["type"] == "limit" and p.get("extended_hours") is True and p["time_in_force"] == "day", p
+        assert "order_class" not in p and "stop_loss" not in p, p
+        oid = f"o{len(self.orders)}"
+        self.orders[oid] = {"id": oid, "status": "new", "side": p["side"], "symbol": p["symbol"], "qty": p["qty"],
+                            "filled_qty": "0", "filled_avg_price": None, "filled_at": None, "payload": p, "legs": [],
+                            "submitted_at": self._order_stamp()}
+        limit = float(p["limit_price"])
+        if self.auto and (limit >= self.ask if p["side"] == "buy" else limit <= self.bid):
+            self.fill(oid, self.ask if p["side"] == "buy" else self.bid)
+        return self.orders[oid]
+
+    def _order_stamp(self):
+        self.seq += 1
+        return (self.clock["t"] + timedelta(microseconds=self.seq)).isoformat().replace("+00:00", "Z")
+
+    def fill(self, oid, price, qty=None):
+        o = self.orders[oid]
+        qty = int(qty or o["qty"])
+        o.update(status="filled" if qty == int(o["qty"]) else "partially_filled", filled_qty=str(qty),
+                 filled_avg_price=str(price), filled_at=self._stamp())
+        self.pos[o["symbol"]] = self.pos.get(o["symbol"], 0) + (qty if o["side"] == "buy" else -qty)
+
+    async def cancel(self, oid):
+        self.cancelled.append(oid)
+        if self.orders[oid]["status"] in ("new", "partially_filled"):
+            self.orders[oid]["status"] = "canceled"
+
+    async def close_position(self, sym):
+        self.market_closes += 1
+        raise AssertionError("a market order outside regular hours would wait for the next open")
+
+    async def position(self, sym):
+        q = self.pos.get(sym, 0)
+        return {"symbol": sym, "qty": str(q), "side": "long" if q > 0 else "short", "current_price": str(self.last)} if q else None
+
+    async def positions(self):
+        return [p for p in [await self.position(s) for s in self.pos] if p]
+
+    async def open_orders(self):
+        return [o for o in self.orders.values() if o["status"] in ("new", "partially_filled")]
+
+    async def closed_orders(self, sym, after):
+        return [o for o in reversed(list(self.orders.values()))
+                if o["symbol"] == sym and o["status"] not in ("new", "partially_filled")
+                and parse_ts(o["submitted_at"]) > parse_ts(after)]      # like the broker: only orders sent later
+
+    async def snapshot(self, sym):
+        return {"latestTrade": {"p": self.last, "t": self._stamp(self.last_age_s)},
+                "latestQuote": {"bp": self.bid, "ap": self.ask, "t": self._stamp(30)}}
+
+    def move(self, price, spread=0.10, last_age_s=1):
+        self.last, self.bid, self.ask, self.last_age_s = price, round(price - spread / 2, 2), round(price + spread / 2, 2), last_age_s
+
+
+@pytest.fixture
+def ext_rig(tmp_path, monkeypatch):
+    async def no_sleep(_): return None
+    monkeypatch.setattr(ex_mod.asyncio, "sleep", no_sleep)
+    clock = {"t": datetime(2026, 11, 23, 13, 0, tzinfo=timezone.utc)}     # 8:00 in New York: before the open
+    monkeypatch.setattr(ex_mod, "now", lambda: clock["t"])
+    api, sess = ExtBroker(clock), FakeSession()
+    sess.ph = "pre"
+    ex = Executor(api, EXT_ON, Journal(tmp_path), sess, FakeUniverse(), root=tmp_path)
+
+    def events(kind):
+        return [r for r in ex.journal.recent_events(1) if r["kind"] == kind]
+    return api, sess, ex, tmp_path, clock, events
+
+
+FAST = {"strategy": "fast", "symbol": "ACME", "side": "long", "price": 100.05, "stop": 98.55, "target_r": 1.0,
+        "max_hold_min": 15, "extended": True, "risk_pct": 0.25, "max_notional": 10000, "max_open": 1,
+        "limit_offset_pct": 0.3, "entry_timeout_s": 15, "meta": {"source": "sec"}}
+
+
+def test_before_the_open_the_entry_is_a_plain_limit_order_and_the_bot_keeps_the_stop_itself(ext_rig):
+    api, sess, ex, tmp, clock, events = ext_rig
+
+    async def go():
+        assert await ex.enter(dict(FAST))
+        t = next(iter(ex.trades.values()))
+        entry = api.orders[t.order_id]["payload"]
+        # at most 10,000 $: 99 shares, although 0.25 % risk with this stop would allow 170
+        assert (entry["qty"], entry["limit_price"], entry["extended_hours"]) == ("99", str(round(100.05 * 1.003, 2)), True)
+        assert (t.style, t.phase, t.status) == ("soft", "pre", "pending")
+        await ex.manage()                                      # filled at the offer: the take-profit goes to the broker
+        assert t.status == "open" and t.entry_price == 100.05
+        tp = api.orders[t.target_order_id]["payload"]
+        assert (tp["side"], tp["qty"], tp["limit_price"], tp["extended_hours"]) == ("sell", "99", "101.55", True)
+        await ex.manage()                                      # price unchanged: nothing happens
+        assert t.id in ex.trades and not t.exit_reason and (t.ticks, t.blind_ticks) == (2, 0)
+        api.move(98.50)                                        # through the stop at 98.55
+        clock["t"] += timedelta(seconds=30)
+        await ex.manage()
+        return t
+    t = asyncio.run(go())
+    assert not ex.trades and t.target_order_id in api.cancelled          # the take-profit is taken away first
+    exit_order = api.orders[t.exit_orders[-1]]["payload"]
+    assert (exit_order["side"], exit_order["qty"], exit_order["extended_hours"]) == ("sell", "99", True)
+    assert exit_order["limit_price"] == str(round(98.45 * 0.995, 2))      # half a percent below the bid
+    row = trades_file(tmp)[0]
+    assert (row["exit_reason"], row["exit_price"], row["style"], row["phase"]) == ("stop", 98.45, "soft", "pre")
+    assert row["pnl"] == round((98.45 - 100.05) * 99, 2) and row["exit_tries"] == 1 and api.market_closes == 0
+    assert [e["reason"] for e in events("trade_closing")] == ["stop"] and len(events("exit_order")) == 1
+
+
+def test_take_profit_resting_at_the_broker_and_the_time_limit(ext_rig):
+    api, sess, ex, tmp, clock, events = ext_rig
+
+    async def go():
+        # 1. the price runs to the target: the resting order fills at the broker, the bot only books it
+        assert await ex.enter(dict(FAST))
+        await ex.manage()
+        t = next(iter(ex.trades.values()))
+        api.move(101.70)
+        api.fill(t.target_order_id, 101.55)
+        await ex.manage()
+        assert not ex.trades
+        # 2. a short position that goes nowhere: closed after 15 minutes, bought back above the offer
+        ex.cooldown.clear()
+        ex.done_today.clear()
+        clock["t"] += timedelta(minutes=5)
+        api.move(100.0)
+        assert await ex.enter({**FAST, "side": "short", "price": 99.95, "stop": 101.45})
+        await ex.manage()
+        t2 = next(iter(ex.trades.values()))
+        assert api.orders[t2.target_order_id]["payload"]["side"] == "buy" and t2.target_price == 98.45
+        clock["t"] += timedelta(minutes=14)
+        await ex.manage()
+        assert t2.id in ex.trades
+        clock["t"] += timedelta(minutes=1, seconds=5)
+        await ex.manage()
+        return t2
+    t2 = asyncio.run(go())
+    rows = trades_file(tmp)
+    assert [(r["side"], r["exit_reason"]) for r in rows] == [("long", "target"), ("short", "time")]
+    assert rows[0]["exit_price"] == 101.55 and rows[0]["pnl"] == round(1.5 * 99, 2)
+    assert rows[1]["exit_price"] == 100.05 and rows[1]["pnl"] == round((99.95 - 100.05) * 100, 2)
+    assert api.orders[t2.exit_orders[-1]]["payload"]["limit_price"] == str(round(100.05 * 1.005, 2))
+
+
+def test_an_exit_that_does_not_fill_goes_further_through_the_market(ext_rig):
+    api, sess, ex, tmp, clock, events = ext_rig
+
+    async def go():
+        assert await ex.enter(dict(FAST))
+        await ex.manage()
+        t = next(iter(ex.trades.values()))
+        api.move(98.0)
+        api.auto = False                       # nobody takes the other side at first
+        await ex.manage()                      # decides "stop", sends the first exit order
+        assert t.status == "closing" and t.exit_tries == 1 and t.id in ex.trades
+        await ex.manage()                      # cancels it and sends the next one, lower
+        assert t.exit_tries == 2 and t.exit_orders[0] in api.cancelled
+        api.auto = True
+        await ex.manage()                      # this one fills
+        return t
+    t = asyncio.run(go())
+    limits = [float(api.orders[o]["payload"]["limit_price"]) for o in t.exit_orders]
+    assert limits == [round(97.95 * 0.995, 2), round(97.95 * 0.99, 2), round(97.95 * 0.985, 2)]
+    row = trades_file(tmp)[0]
+    assert (row["exit_reason"], row["exit_tries"], row["exit_price"]) == ("stop", 3, 97.95) and not ex.trades
+
+
+def test_without_a_price_the_position_is_closed_after_a_minute(ext_rig):
+    api, sess, ex, tmp, clock, events = ext_rig
+
+    async def go():
+        assert await ex.enter(dict(FAST))
+        await ex.manage()
+        t = next(iter(ex.trades.values()))
+        # the last trade is minutes old and bid and offer are far apart: the bot cannot tell where the price is
+        api.move(100.0, spread=2.0, last_age_s=300)
+        for _ in range(5):
+            clock["t"] += timedelta(seconds=10)
+            await ex.manage()
+        assert t.id in ex.trades and (t.ticks, t.blind_ticks) == (6, 5) and not t.exit_reason
+        api.move(100.0, spread=0.10, last_age_s=300)      # a narrow quote is enough to see again
+        clock["t"] += timedelta(seconds=10)
+        await ex.manage()
+        assert t.blind_ticks == 5 and not t.exit_reason
+        api.move(100.0, spread=2.0, last_age_s=300)
+        for _ in range(6):
+            clock["t"] += timedelta(seconds=10)
+            await ex.manage()
+        return t
+    t = asyncio.run(go())
+    row = trades_file(tmp)[0]
+    assert row["exit_reason"] == "blind" and row["blind_ticks"] == 11 and row["ticks"] == 13 and not ex.trades
+    assert row["exit_price"] == 99.0                       # sold at the (wide) bid
+
+
+def test_session_end_second_opinion_and_a_position_closed_by_hand(ext_rig):
+    api, sess, ex, tmp, clock, events = ext_rig
+
+    async def one(then):
+        ex.cooldown.clear()
+        ex.done_today.clear()
+        sess.ext_mins = 120
+        clock["t"] += timedelta(minutes=5)
+        assert await ex.enter(dict(FAST))
+        await ex.manage()
+        t = next(iter(ex.trades.values()))
+        await then(t)
+        clock["t"] += timedelta(seconds=10)
+        await ex.manage()
+        if then is by_hand:                   # one empty answer from the broker is not enough to give a position up
+            assert t.id in ex.trades and t.missing == 1
+            await ex.manage()
+        assert not ex.trades
+
+    async def session_end(t):
+        sess.ext_mins = 9                     # pre-market trades are flat ten minutes before the open
+
+    async def recheck(t):
+        assert ex.request_exit("ACME", "recheck") and not ex.request_exit("NONE", "recheck")
+
+    async def by_hand(t):                     # sold in the broker's dashboard: the take-profit is gone, so is the position
+        await api.cancel(t.target_order_id)
+        api.orders["hand"] = {"id": "hand", "status": "filled", "side": "sell", "symbol": "ACME", "qty": "99",
+                              "filled_qty": "99", "filled_avg_price": "100.40", "filled_at": api._stamp(), "legs": [],
+                              "submitted_at": api._order_stamp()}
+        api.pos["ACME"] = 0
+
+    async def go():
+        for then in (session_end, recheck, by_hand):
+            await one(then)
+    asyncio.run(go())
+    rows = trades_file(tmp)
+    assert [r["exit_reason"] for r in rows] == ["session_end", "recheck", "external"]
+    assert rows[2]["exit_price"] == 100.4 and rows[2]["pnl"] == round(0.35 * 99, 2)
+
+
+def test_entries_out_of_hours_need_the_switch_the_permission_and_enough_time(ext_rig, tmp_path):
+    api, sess, ex, tmp, clock, events = ext_rig
+
+    async def go():
+        out = {}
+        out["news"] = await ex.can_enter("news", "ACME")                       # the old strategy stays in regular hours
+        out["fast"] = await ex.can_enter("fast", "ACME", extended=True, max_open=1)
+        sess.ext_mins = 19                                                     # 10 min to the flatten + 10 min margin
+        out["late"] = await ex.can_enter("fast", "ACME", extended=True)
+        sess.ext_mins, sess.ph = 120, None                                     # overnight
+        out["night"] = await ex.can_enter("fast", "ACME", extended=True)
+        sess.ph = "post"
+        off = Executor(api, CFG, Journal(tmp_path / "off"), sess, FakeUniverse(), root=tmp_path / "off")
+        out["switched_off"] = await off.can_enter("fast", "ACME", extended=True)
+        # one position at a time for this strategy
+        assert await ex.enter(dict(FAST))
+        out["second"] = await ex.can_enter("fast", "BETA", extended=True, max_open=1)
+        out["other_strategy"] = await ex.can_enter("other", "BETA", extended=True, max_open=1)
+        return out
+    out = asyncio.run(go())
+    assert out == {"news": (False, "session"), "fast": (True, ""), "late": (False, "session"),
+                   "night": (False, "session"), "switched_off": (False, "session"),
+                   "second": (False, "max_open_strategy"), "other_strategy": (True, "")}
+
+
+def test_in_regular_hours_a_fast_entry_still_gets_its_stop_at_the_broker(rig):
+    api, sess, ex, tmp = rig
+
+    async def go():
+        assert await ex.enter(dict(FAST))
+        t = next(iter(ex.trades.values()))
+        p = api.orders[t.order_id]["payload"]
+        assert p["order_class"] == "bracket" and "extended_hours" not in p and p["qty"] == "99"
+        assert (t.style, t.phase, t.entry_timeout_s) == ("bracket", "regular", 15)
+        api.fill(t.order_id, 100.1, 99)
+        await ex.manage()
+        assert ex.request_exit("ACME", "recheck")          # the second opinion disagrees
+        await ex.manage()
+    asyncio.run(go())
+    row = trades_file(tmp)[0]
+    assert (row["exit_reason"], row["style"]) == ("recheck", "bracket") and api.closed == ["ACME"]
+
+
+def test_leftovers_and_the_guard_close_with_limit_orders_out_of_hours(ext_rig):
+    from tools.guard import ext_due, status_age_s, worth_a_look
+    api, sess, ex, tmp, clock, events = ext_rig
+    ext = EXT_ON["extended"]
+
+    async def go():
+        api.pos["ZZZ"] = -40                                   # a short position nobody is managing
+        await ex.close_orphans()
+        return await api.positions()
+    assert asyncio.run(go()) == [] and api.market_closes == 0
+    order = next(o for o in api.orders.values() if o["symbol"] == "ZZZ")["payload"]
+    assert (order["side"], order["qty"], order["extended_hours"]) == ("buy", "40", True)
+    assert events("orphan")[0]["action"] == "closed"
+    # the guard: after the bot's own closing time at the end of both sessions, or when the bot is silent
+    assert ext_due("pre", 30, ext, 20) is None and ext_due("pre", 7, ext, 20) == "session_end"
+    assert ext_due("pre", 8, ext, 20) is None                  # the bot goes first (10 minutes), the guard 3 minutes later
+    assert ext_due("post", 12, ext, 20) == "session_end" and ext_due("post", 13, ext, 20) is None
+    assert ext_due("post", 60, ext, 181) == "bot_silent" and ext_due("post", 60, ext, None) == "bot_silent"
+    assert ext_due("regular", 60, ext, None) is None and ext_due(None, 60, ext, None) is None
+    assert ext_due("pre", 1, CFG["extended"], None) is None    # switched off: the guard leaves these hours alone
+    assert status_age_s(tmp) is None
+    Journal(tmp).status({"x": 1})
+    assert 0 <= status_age_s(tmp) < 5
+    night = datetime(2026, 11, 24, 3, 0, tzinfo=timezone.utc)
+    assert worth_a_look(True, night) and not worth_a_look(False, night)
+    assert worth_a_look(False, night.replace(hour=20)) and not worth_a_look(False, datetime(2026, 11, 21, 20, 0, tzinfo=timezone.utc))
+
+
+def test_day_result_with_trading_after_the_close_starts_at_the_beginning_of_the_day():
+    from bot.main import day_result
+    acct = {"equity": "101000", "last_equity": "100500"}
+    # the broker's value from 16:00 the day before would count yesterday evening's trades a second time
+    assert day_result(acct, 100000.0, 100800.0) == {"equity_start": 100800.0, "equity_end": 101000.0, "pnl": 200.0,
+                                                    "basis": "day_start"}
+    assert day_result(acct, 100000.0, None)["basis"] == "last_close" and day_result(acct, 100000.0)["pnl"] == 500.0
+
+
+def test_a_whole_morning_and_evening_out_of_hours_through_the_running_bot(tmp_path, monkeypatch):
+    """The running program before the open and after the close: a trade is stopped out, a second one
+    is closed when the session nears its end, and the day's summary is written after the evening
+    session. Not a single market order, because the broker would hold it until the next open."""
+    from collections import Counter
+    from bot import common as common_mod, main as main_mod, orb_strategy as orb_mod
+
+    for mod in (common_mod, main_mod, ex_mod, orb_mod):
+        monkeypatch.setattr(mod, "DATA", tmp_path)
+    for name, value in (("APCA_API_KEY_ID", "test"), ("APCA_API_SECRET_KEY", "test")):
+        monkeypatch.setenv(name, value)
+    for name in ("ANTHROPIC_API_KEY", "APCA_BASE_URL", "APCA_DATA_FEED", "SEC_CONTACT", "FINNHUB_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    real_sleep = asyncio.sleep
+
+    async def quick(seconds):                       # waits still give way to the other tasks, only shorter
+        await real_sleep(min(seconds, 0.01))
+    monkeypatch.setattr(asyncio, "sleep", quick)
+
+    class Now(dict):
+        def __getitem__(self, key): return datetime.now(timezone.utc)
+
+    class Broker(ExtBroker):
+        cancel_alls = 0
+        async def calendar(self, day, end=None):
+            return [{"date": day, "open": "09:30", "close": "16:00", "session_open": "0400", "session_close": "2000"}]
+        async def assets(self):
+            return [{"symbol": "ACME", "class": "us_equity", "status": "active", "tradable": True, "exchange": "NYSE",
+                     "name": "Acme Corp", "shortable": True, "easy_to_borrow": True}]
+        async def cancel_all(self):
+            self.cancel_alls += 1
+            for o in await self.open_orders():
+                await self.cancel(o["id"])
+
+    broker = Broker(Now())
+    cfg = json.loads(json.dumps(EXT_ON))
+    cfg["execution"]["poll_s"] = cfg["extended"]["poll_s"] = 0.02
+    for part in ("edgar", "wires", "speed"):
+        cfg[part]["enabled"] = False
+    monkeypatch.setattr(main_mod, "load_config", lambda: cfg)
+    monkeypatch.setattr(main_mod, "Alpaca", lambda *a, **k: broker)
+    day = datetime.now(timezone.utc).astimezone(ET).strftime("%Y-%m-%d")
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state" / "day_start.json").write_text(json.dumps({"day": day, "equity": 100000.0}))
+
+    async def scenario():
+        b = main_mod.Bot()
+
+        async def idle():
+            await real_sleep(3600)
+        b.news_loop = idle
+
+        def seen(kind):
+            return sum(1 for r in b.journal.recent_events(1) if r["kind"] == kind)
+
+        async def until(what, check):
+            for _ in range(400):
+                if check():
+                    return
+                await real_sleep(0.02)
+            raise AssertionError(f"not reached: {what}; events: {[r for r in b.journal.recent_events(1)][-12:]}")
+
+        def holding():
+            return any(t.status == "open" and t.target_order_id for t in b.executor.trades.values())
+
+        s = b.session
+        await s.refresh()
+        t = datetime.now(timezone.utc)              # pretend: pre-market trading started two hours ago
+        s.ext_open, s.open, s.close, s.ext_close = (t + timedelta(hours=h) for h in (-2, 2, 8, 12))
+        task = asyncio.ensure_future(b.run())
+        try:
+            await until("day start", lambda: seen("day_start"))
+            assert await b.executor.enter(dict(FAST))                     # what the fast strategy will send
+            await until("position with take-profit at the broker", holding)
+            broker.move(98.0)                                             # through the stop
+            await until("stopped out", lambda: not b.executor.trades)
+            b.executor.cooldown.clear()
+            b.executor.done_today.clear()
+            broker.move(100.0)
+            assert await b.executor.enter(dict(FAST))
+            await until("second position", holding)
+            s.open = datetime.now(timezone.utc) + timedelta(minutes=9)    # ten minutes before the open everything is closed
+            await until("pre-market closed out", lambda: seen("session_end") == 1)
+            assert not b.executor.trades and not await broker.positions()
+            assert not await b.executor.enter(dict(FAST))                 # and nothing new is opened
+            t = datetime.now(timezone.utc)                                # evening: the last minutes after the close
+            s.open, s.close, s.ext_close = t - timedelta(hours=8), t - timedelta(hours=1), t + timedelta(minutes=14)
+            await until("day's summary", lambda: seen("day_end") >= 1)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        return b
+
+    b = asyncio.run(scenario())
+    rows = list(b.journal.recent_events(1))
+    kinds = Counter(r["kind"] for r in rows)
+    assert kinds["error"] == 0, [r for r in rows if r["kind"] == "error"]
+    trades = trades_file(tmp_path)
+    assert [(r["exit_reason"], r["style"], r["phase"]) for r in trades] == [("stop", "soft", "pre"), ("session_end", "soft", "pre")]
+    assert [r["phase"] for r in rows if r["kind"] == "session_end"] == ["pre", "post"]
+    assert broker.market_closes == 0 and broker.cancel_alls >= 2 and not await_none(broker.open_orders())
+    daily = json.loads((tmp_path / "logs" / "daily" / f"{day}.json").read_text())
+    assert (daily["basis"], daily["equity_start"], daily["trades"], daily["extended"]) == ("day_start", 100000.0, 2, True)
+    status = json.loads((tmp_path / "logs" / "status.json").read_text())
+    assert status["extended"] is True and status["open_trades"] == []
+
+
+def await_none(coro):
+    """Run a small coroutine of a fake outside the event loop."""
+    return asyncio.run(coro)

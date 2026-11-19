@@ -11,27 +11,65 @@ FUND_RE = re.compile(
 )
 
 
+def extended_hours(day_row: dict, open_, close):
+    """Start of pre-market and end of after-hours trading for one calendar row.
+
+    Alpaca's calendar names them as session_open / session_close ("0400", "2000"). After-hours
+    trading lasts four hours, also on a half day, so the end is never later than that.
+    """
+    def at(hhmm, fallback):
+        try:
+            digits = str(hhmm).replace(":", "")
+            return open_.replace(hour=int(digits[:2]), minute=int(digits[2:4]))
+        except (TypeError, ValueError):
+            return fallback
+    early, late = open_.replace(hour=4, minute=0), close + timedelta(hours=4)
+    start = at(day_row.get("session_open"), early)
+    end = min(at(day_row.get("session_close"), late), late)
+    return (start if start <= open_ else early), (end if end >= close else late)
+
+
 class Session:
-    """Today's regular session, from Alpaca's calendar (handles holidays and half days)."""
+    """Today's trading sessions, from Alpaca's calendar (handles holidays and half days):
+    pre-market (ext_open to open), the regular session (open to close), after-hours (close to ext_close)."""
 
     def __init__(self, api):
         self.api = api
         self.day = None
         self.open = None
         self.close = None
+        self.ext_open = None
+        self.ext_close = None
 
     async def refresh(self):
         day = now().astimezone(ET).strftime("%Y-%m-%d")
         if day == self.day:
             return
         cal = await self.api.calendar(day)
-        self.day, self.open, self.close = day, None, None
+        self.day, self.open, self.close, self.ext_open, self.ext_close = day, None, None, None, None
         if cal and cal[0]["date"] == day:
             d = datetime.strptime(day, "%Y-%m-%d")
             oh, om = map(int, cal[0]["open"].split(":"))
             ch, cm = map(int, cal[0]["close"].split(":"))
             self.open = d.replace(hour=oh, minute=om, tzinfo=ET)
             self.close = d.replace(hour=ch, minute=cm, tzinfo=ET)
+            self.ext_open, self.ext_close = extended_hours(cal[0], self.open, self.close)
+
+    def phase(self):
+        """'pre', 'regular' or 'post' while that session is running, else None."""
+        if not self.trading_day:
+            return None
+        t = now()
+        if self.open <= t < self.close:
+            return "regular"
+        if self.ext_open and self.ext_open <= t < self.open:
+            return "pre"
+        if self.ext_close and self.close <= t < self.ext_close:
+            return "post"
+        return None
+
+    def phase_end(self, phase):
+        return {"pre": self.open, "regular": self.close, "post": self.ext_close}.get(phase)
 
     @property
     def trading_day(self):

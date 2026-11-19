@@ -17,6 +17,26 @@ entry_timeout_s          = 20    # nicht ausgeführte Einstiege nach dieser Zeit
 flatten_before_close_min = 10    # so viele Minuten vor Börsenschluss alles glattstellen
 poll_s                   = 5     # Prüfintervall für offene Trades
 
+[extended]
+# Handel vor Börsenbeginn (4:00 bis 9:30 Uhr New Yorker Zeit, also 10:00 bis 15:30 Uhr deutscher Zeit)
+# und nach Börsenschluss (16:00 bis 20:00 Uhr, also 22:00 bis 2:00 Uhr deutscher Zeit).
+# Dort nimmt der Broker nur einfache Limit-Orders an. Das Kursziel liegt deshalb als Limit-Order beim
+# Broker; Stop, Zeitlimit und Sitzungsende überwacht der Bot selbst und schließt mit Limit-Orders
+# durch den Markt. ABGESCHALTET, bis Josh die Werte freigegeben hat.
+enabled                     = false
+poll_s                      = 2     # Prüfintervall, solange eine solche Position offen ist
+flatten_before_end_min_pre  = 10    # vorbörslich alles glatt bis 9:20 Uhr New Yorker Zeit (15:20 Uhr deutscher Zeit)
+flatten_before_end_min_post = 15    # nachbörslich alles glatt bis 19:45 Uhr (1:45 Uhr deutscher Zeit)
+no_entry_before_flatten_min = 10    # so lange davor keine neuen Einstiege mehr
+trade_fresh_s               = 10    # ein Handelskurs zählt für Stop und Ziel, wenn er höchstens so alt ist
+max_mark_spread_pct         = 0.6   # sonst zählt die Mitte aus Geld- und Briefkurs, wenn beide höchstens so weit auseinanderliegen
+blind_exit_s                = 60    # so lange ohne verlässlichen Kurs: Position schließen (ein Stop, der nichts sieht, schützt nicht)
+exit_limit_offset_pct       = 0.5   # Ausstiegs-Limit so weit durch den Markt (beim Verkauf unter dem Geldkurs)
+exit_offset_step_pct        = 0.5   # bei jedem weiteren Versuch um so viel weiter
+exit_offset_max_pct         = 5.0
+exit_retry_s                = 4     # nicht ausgeführten Ausstieg nach dieser Zeit weiter durch den Markt neu senden
+guard_stale_s               = 180   # der Wächter schließt offene Positionen, wenn der Bot so lange kein Lebenszeichen gegeben hat
+
 [news]
 enabled                  = true
 max_article_age_s        = 90    # ältere Meldungen aus Alpacas Strom werden nicht mehr gehandelt

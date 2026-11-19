@@ -6,6 +6,7 @@ import httpx
 
 DATA = "https://data.alpaca.markets"
 FEED = "iex"  # free plan; switch to "sip" with the paid data plan
+LIVE_PER_MIN = 40   # price checks for open positions; together with the data budget below Alpaca's 200 per minute
 
 
 class AlpacaError(Exception):
@@ -25,25 +26,27 @@ class Alpaca:
         )
         # Trading and market-data calls have separate limits at Alpaca; keeping two budgets
         # means a burst of data requests can never delay order management.
-        self._stamps = {"trading": [], "data": []}
-        self._max = max_per_min
-        self._locks = {"trading": asyncio.Lock(), "data": asyncio.Lock()}
+        # A third, small budget ("live") is reserved for the prices of open positions: a long
+        # measurement run that uses up the data budget must not make a stop wait.
+        self._stamps = {"trading": [], "data": [], "live": []}
+        self._max = {"trading": max_per_min, "data": max_per_min, "live": LIVE_PER_MIN}
+        self._locks = {k: asyncio.Lock() for k in self._stamps}
 
-    async def _throttle(self, url):
-        kind = "data" if url.startswith(DATA) else "trading"
+    async def _throttle(self, url, kind=None):
+        kind = kind or ("data" if url.startswith(DATA) else "trading")
         async with self._locks[kind]:
             while True:
                 t = time.monotonic()
                 self._stamps[kind] = [s for s in self._stamps[kind] if t - s < 60]
-                if len(self._stamps[kind]) < self._max:
+                if len(self._stamps[kind]) < self._max[kind]:
                     self._stamps[kind].append(t)
                     return
                 await asyncio.sleep(0.5)
 
-    async def _req(self, method, url, ok404=False, **kw):
+    async def _req(self, method, url, ok404=False, budget=None, **kw):
         last = None
         for attempt in range(3):
-            await self._throttle(url)
+            await self._throttle(url, budget)
             try:
                 r = await self.http.request(method, url, **kw)
             except httpx.HTTPError as e:
@@ -128,6 +131,12 @@ class Alpaca:
     async def snapshot(self, symbol):
         return await self._req(
             "GET", f"{DATA}/v2/stocks/{symbol}/snapshot", params={"feed": self.feed}, ok404=True
+        )
+
+    async def live_snapshot(self, symbol):
+        """The same snapshot from the budget reserved for open positions and entries."""
+        return await self._req(
+            "GET", f"{DATA}/v2/stocks/{symbol}/snapshot", params={"feed": self.feed}, ok404=True, budget="live"
         )
 
     async def snapshots(self, symbols):

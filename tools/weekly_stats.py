@@ -74,7 +74,7 @@ def day_result(daily, events):
     the day. For those the start is the previous close if a later start of the bot logged it that
     day, otherwise the bot's first reading of the day.
     """
-    if daily.get("basis") == "last_close":
+    if daily.get("basis") in ("last_close", "day_start"):
         return daily["equity_start"], daily["pnl"]
     starts = [e for e in events if e["kind"] == "day_start"]
     last_close = next((e["last_equity"] for e in starts if e.get("last_equity")), None)

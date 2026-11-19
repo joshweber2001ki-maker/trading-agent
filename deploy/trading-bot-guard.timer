@@ -1,9 +1,10 @@
 [Unit]
-Description=Trading bot guard: every two minutes in the US afternoon (covers early closes and both DST regimes)
+Description=Trading bot guard: every minute while a US session can be running (pre-market, regular, after-hours; both DST regimes)
 
 [Timer]
-OnCalendar=Mon..Fri *-*-* 16..21:00/2:00 UTC
-AccuracySec=10s
+OnCalendar=Mon..Fri *-*-* 08..23:*:00 UTC
+OnCalendar=Tue..Sat *-*-* 00:*:00 UTC
+AccuracySec=5s
 
 [Install]
 WantedBy=timers.target

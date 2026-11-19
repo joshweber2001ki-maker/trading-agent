@@ -22,17 +22,25 @@ from .wires import Wires
 NEWS_WS = "wss://stream.data.alpaca.markets/v1beta1/news"
 
 
-def day_result(account: dict, bot_start_equity=None) -> dict:
+def day_result(account: dict, bot_start_equity=None, day_start_equity=None) -> dict:
     """Account value at the start and end of the day and the difference.
 
     The start is the broker's value at yesterday's close. The bot's own first reading of the day
     is only the fallback: after a restart during the day it would hide everything before it.
+
+    With trading after the close that is no longer right: the broker's value is taken at 16:00
+    New York time, so the evening's trades would count for the next day as well. Then the start
+    is the account value at the beginning of the New York day (day_start_equity), which the bot
+    writes down once per day and keeps across restarts.
     """
     equity = float(account["equity"])
     last_close = float(account.get("last_equity") or 0)
-    start = last_close or bot_start_equity or equity
-    return {"equity_start": start, "equity_end": equity, "pnl": round(equity - start, 2),
-            "basis": "last_close" if last_close else "bot_start"}
+    if day_start_equity:
+        start, basis = day_start_equity, "day_start"
+    else:
+        start = last_close or bot_start_equity or equity
+        basis = "last_close" if last_close else "bot_start"
+    return {"equity_start": start, "equity_end": equity, "pnl": round(equity - start, 2), "basis": basis}
 
 
 class Bot:
@@ -60,11 +68,14 @@ class Bot:
         # Measurement only, no trading: SEC filings as a list, and how fast prices react to announcements.
         self.edgar = Edgar(self.cfg["edgar"], env("SEC_CONTACT", ""), self.universe, self.journal)
         self.speed = Speed(self.api, self.cfg["speed"], self.journal, self.universe, self.news.stock_stats)
+        self.ext = self.cfg.get("extended") or {}
         self.day = None
         self.outcomes_day = None
         self.speed_day = None
         self.flattened = False
+        self.ext_flattened = set()     # pre-market / after-hours sessions already closed out today
         self.start_equity = None
+        self.day_start_equity = None   # account value at the start of the New York day (kept across restarts)
         self.errors = 0
         self.ws_connected = False
         self.last_status = 0
@@ -111,16 +122,24 @@ class Bot:
                 await self.session.refresh()
                 if self.session.day != self.day:
                     await self.new_day()
-                if self.session.is_open():
+                phase = self.session.phase()
+                if phase == "regular":
                     await self.executor.manage()
                     if self.executor.flatten_due() and not self.flattened:
                         await self.end_of_day()
                     elif not self.flattened:
                         await self.orb.step()
-                elif self.session.trading_day and now() < self.session.open:
-                    await self.orb.step()
-                elif self.session.trading_day and now() >= self.session.close:
-                    self.after_close()
+                else:
+                    # Before the open and after the close: trades there are watched by the bot itself.
+                    # A position that could not be closed in time is looked after until it is gone.
+                    if (phase and self.ext.get("enabled")) or self.executor.has_soft():
+                        await self.executor.manage()
+                        if phase and self.executor.ext_flatten_due() and phase not in self.ext_flattened:
+                            await self.end_of_session(phase)
+                    if self.session.trading_day and now() < self.session.open:
+                        await self.orb.step()
+                    elif self.session.trading_day and now() >= self.session.close:
+                        self.after_close()
             except Exception as e:
                 self.errors += 1
                 self.journal.event("error", where="control", error=repr(e)[:300])
@@ -130,7 +149,7 @@ class Bot:
                     self.write_status()
                 except Exception as e:   # e.g. a full disk: must not end trade management
                     log.warning("status not written: %r", e)
-            await asyncio.sleep(poll)
+            await asyncio.sleep(self.ext.get("poll_s", poll) if self.executor.has_soft() else poll)
 
     def after_close(self):
         """Measurements that need whole-market data, which is free once it is 15 minutes old.
@@ -139,6 +158,10 @@ class Bot:
         if self.outcomes_day != self.day and since >= OUTCOME_DELAY_MIN:
             self.outcomes_day = self.day
             spawn(self.news.log_outcomes())
+        if self.ext.get("enabled"):
+            # With trading after the close, the long measurement waits until that session is over:
+            # it needs many price requests, and nothing may slow down an open position.
+            since = (now() - self.session.ext_close).total_seconds() / 60
         if self.speed_day != self.day and self.cfg["speed"]["enabled"] and since >= self.cfg["speed"]["after_close_min"]:
             self.speed_day = self.day
             spawn(self.speed.run())
@@ -157,12 +180,33 @@ class Bot:
                 for t in self.executor.trades.values()
             ],
             "trades_today": self.executor.trades_today, "errors_today": self.errors,
-            "flattened": self.flattened,
+            "flattened": self.flattened, "phase": s.phase(), "extended": bool(self.ext.get("enabled")),
         })
+
+    def _day_start_equity(self, equity):
+        """The account value at the start of the New York day: written down at the first look of
+        the day, read again after a restart. Returns None if this day's value was never taken at
+        its start (the bot was first started in the middle of it)."""
+        path = DATA / "state" / "day_start.json"
+        try:
+            d = json.loads(path.read_text())
+            if d.get("day") == self.day:
+                return d.get("equity")
+        except (OSError, ValueError):
+            pass
+        fresh = self.session.ext_open is None or now() < self.session.ext_open   # nothing can have traded yet
+        value = equity if fresh else None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"day": self.day, "equity": value}))
+        except OSError as e:
+            log.warning("day start not written: %r", e)
+        return value
 
     async def new_day(self):
         self.day = self.session.day
         self.flattened = False
+        self.ext_flattened = set()
         self.errors = 0
         self.executor.start_day(self.day)
         self.news.reset_day()
@@ -178,26 +222,45 @@ class Bot:
             self.journal.event("error", where="universe", error=repr(e)[:200])
         a = await self.api.account()
         self.start_equity = float(a["equity"])
+        self.day_start_equity = self._day_start_equity(self.start_equity)
         self.journal.event(
             "day_start", day=self.day, trading_day=self.session.trading_day, universe=universe,
             equity=self.start_equity, last_equity=float(a.get("last_equity") or 0) or None,
             llm=self.llm.available, llm_model=self.llm.model, llm_shadow=[c.model for c in self.shadows],
             news=self.cfg["news"]["enabled"], orb=self.cfg["orb"]["enabled"],
+            extended=bool(self.ext.get("enabled")),
         )
         if self.session.trading_day and now() >= self.session.open:
             # Started mid-session: the opening range is gone, skip ORB today.
             self.orb.stage = "done"
 
     async def end_of_day(self):
+        """Shortly before the regular close: everything flat. Without trading after the close this
+        also ends the day; with it, the day's summary is written when that session is over."""
         await self.executor.flatten("eod")
         await self.api.cancel_all()
         self.flattened = True
+        if not self.ext.get("enabled"):
+            await self.write_summary()
+
+    async def end_of_session(self, phase):
+        """Shortly before the pre-market or the after-hours session ends: close what was opened in it."""
+        await self.executor.flatten("session_end")
+        await self.api.cancel_all()
+        self.ext_flattened.add(phase)
+        self.journal.event("session_end", phase=phase, still_open=sorted(t.symbol for t in self.executor.trades.values()))
+        if phase == "post":
+            await self.write_summary()
+
+    async def write_summary(self):
+        ext = bool(self.ext.get("enabled"))
         summary = {
-            "day": self.day, **day_result(await self.api.account(), self.start_equity),
+            "day": self.day,
+            **day_result(await self.api.account(), self.start_equity, self.day_start_equity if ext else None),
             "trades": self.executor.trades_today, "news": self.news.stats, "wires": self.wires.stats,
             "llm_model": self.llm.model, "llm_calls": self.llm.day_calls,
             "llm_shadow_calls": {c.model: c.day_calls for c in self.shadows}, "errors": self.errors,
-            "orb_watched": sorted(self.orb.ranges), "orb_traded": sorted(self.orb.fired),
+            "orb_watched": sorted(self.orb.ranges), "orb_traded": sorted(self.orb.fired), "extended": ext,
         }
         if not (self.journal.dir / "daily" / f"{self.day}.json").exists():  # keep the first summary after a restart
             self.journal.daily(self.day, summary)

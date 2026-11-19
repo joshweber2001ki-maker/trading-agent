@@ -1,5 +1,5 @@
 [Unit]
-Description=Trading bot guard: make sure nothing stays open over the close
+Description=Trading bot guard: nothing stays open over the close, and nothing unwatched before the open or after the close
 ConditionPathExists=/etc/trading-bot/alpaca.env
 
 [Service]
