@@ -185,6 +185,9 @@ class Executor:
         self.cooldown = {}        # symbol -> datetime until which news entries are blocked
         self.halt_logged = False
         self._acct = (0, None)
+        # Entries are decided one after the other. Two announcements in the same second must not
+        # both pass the limits before either of them is on the books.
+        self._entering = asyncio.Lock()
 
     # ── state ────────────────────────────────────────────────────────────────
     def save(self):
@@ -305,6 +308,10 @@ class Executor:
         return True, ""
 
     async def enter(self, sig: dict) -> bool:
+        async with self._entering:
+            return await self._enter(sig)
+
+    async def _enter(self, sig: dict) -> bool:
         """sig: strategy, symbol, side, price, stop, target_r, max_hold_min, meta.
 
         Optional: extended (may be entered before the open and after the close), risk_pct and

@@ -2136,3 +2136,33 @@ def test_a_falling_stock_is_sold_short_and_a_rating_that_arrives_too_late_is_not
     assert (order["side"], order["limit_price"]) == ("sell", "94.05") and t.side == "short"
     # stop 2 % x 1.5 = 3 % above the fill, target 2 % x 3 = 6 % below it
     assert (t.entry_price, t.stop_price, t.target_price) == (97.95, 100.89, 92.07)
+
+
+def test_two_announcements_in_the_same_second_open_only_one_position(fast_rig, monkeypatch):
+    api, sess, ex, tmp, clock, events, make, article, fast_mod = fast_rig
+    monkeypatch.setattr(fast_mod, "now", lambda: clock["t"])
+
+    async def slow_submit(p, _submit=api.submit):
+        for _ in range(5):          # the broker takes a moment to answer: time for the other entry to overlap
+            await asyncio.get_running_loop().run_in_executor(None, lambda: None)
+        return await _submit(p)
+    api.submit = slow_submit
+
+    class NoLock:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+
+    def run(lock):
+        ex.trades.clear()
+        ex.done_today.clear()
+        if not lock:
+            ex._entering = NoLock()
+        fast = make(FakeModel("claude-opus-5-5", "up"))
+        n = len(events("rejected"))
+
+        async def go():
+            await asyncio.gather(fast.on_article(article(1, sym="ACME")), fast.on_article(article(2, sym="BETA")))
+        asyncio.run(go())
+        return len(ex.trades), fast.stats["entered"], [e["reason"] for e in events("rejected")[n:]]
+    assert run(lock=True) == (1, 1, ["max_open_strategy"])
+    assert run(lock=False)[0] == 2          # without deciding one after the other, both would get through
