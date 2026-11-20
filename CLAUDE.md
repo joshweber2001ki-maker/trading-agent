@@ -1,6 +1,6 @@
 # Trading-Bot (Alpaca Paper-Trading)
 
-Stand: 2026-11-19. Zweck: kurzfristigen Handel nach Unternehmensmeldungen mit großen
+Stand: 2026-11-20. Zweck: kurzfristigen Handel nach Unternehmensmeldungen mit großen
 Positionen im **Paper-Konto** testen. Die zweite Strategie (Ausbruch aus der Eröffnungsspanne)
 ist seit dem 17.11.2026 auf Joshs Entscheidung abgeschaltet (`[orb] enabled = false`); der
 Code bleibt im Repo. Echtgeld ist nicht vorgesehen; `bot/main.py` verweigert den Start,
@@ -100,6 +100,8 @@ Vorschlag an Josh: dort nur einsteigen, wenn der Bot vorher Geld- und Briefkurs 
 1 Aktie oder Datenpaket) und die Spanne höchstens 0,5 % beträgt; Sofort-Einstieg auch in der
 Handelszeit, wo die Spanne klein ist. Dann muss die KI vor und nach der Börse in etwa zwei von drei
 Fällen richtig liegen, in der Handelszeit in jedem zweiten. Zahlen: `memory/strategy.md`, „Dritte Auswertung“.
+Der Vorschlag mit allen Werten: `reports/2026-11-20-vorschlag-zweite-fassung.md`. Umgesetzt wird er erst
+nach Joshs Ja; bis dahin läuft die erste Fassung wie freigegeben.
 
 **Was noch fehlt**
 - Schnelle Quelle: RTPR (Pressemitteilungen in unter einer Sekunde, 139 $ im Monat nach sieben
