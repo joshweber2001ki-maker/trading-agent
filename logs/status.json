@@ -1,5 +1,5 @@
 {
- "t": "2026-11-20T03:06:41Z",
+ "t": "2026-11-20T04:06:44Z",
  "version": "f812d905f621d4659537f144b921466535f5d4c8",
  "day": "2026-11-19",
  "trading_day": true,
@@ -13,18 +13,18 @@
   "claude-sonnet-5-5": 0
  },
  "news": {
-  "received": 432,
+  "received": 433,
   "classified": 0,
   "candidates": 0
  },
  "wires": {
-  "polls": 3530,
-  "items": 304,
+  "polls": 4120,
+  "items": 324,
   "matched": 117,
   "errors": 0
  },
  "edgar": {
-  "polls": 36,
+  "polls": 42,
   "filings": 170,
   "matched": 116,
   "errors": 0
