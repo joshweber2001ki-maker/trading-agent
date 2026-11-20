@@ -28,7 +28,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/speed.py` | Tempo-Messung nach Börsenschluss: Kursverlauf im Sekundentakt nach jeder Meldung; kein Handel |
 | `tools/check.py` | Verbindungstest |
 | `tools/guard.py` | Wächter, läuft jede Minute unabhängig vom Bot: schließt kurz vor Börsenschluss alles, falls der Bot es nicht getan hat; mit `[extended]` auch vor dem Ende der Sitzungen vor und nach der Börse und sobald der Bot dort drei Minuten kein Lebenszeichen gibt |
-| `tools/weekly_stats.py` | Wochenstatistik aus den Protokollen |
+| `tools/weekly_stats.py` | Wochenstatistik aus den Protokollen; Abschnitt „Sofort-Einstieg“: jede Bewertung gegen den Kursverlauf derselben Meldung (Trefferquote der KI) |
 | `tools/backtest_orb.py` | grobe Rückrechnung der Ausbruchs-Strategie (braucht Alpaca-Schlüssel) |
 | `tools/replay_news.py` | einen vergangenen Tag durch die News-Strategie spielen (braucht beide Schlüssel) |
 | `tools/speed_check.py` | eine einzelne Meldung von Hand nachmessen (braucht Alpaca-Schlüssel) |
@@ -110,8 +110,8 @@ Fällen richtig liegen, in der Handelszeit in jedem zweiten. Zahlen: `memory/str
   Die SEC-Liste bekam am 19.11. ab 6:00 Uhr New Yorker Zeit keine Antwort mehr vom Dienst der SEC (nur
   diese eine Adresse; der Server ist nicht gesperrt); der Bot holt bis zu anderthalb Tage nach.
 - Dossiers über die Erwartungen hinaus (Prognose der Firma, Kursverlauf davor), zweite Meinung eines
-  zweiten Modells, abendliche Prüfung jeder Ausführung gegen den echten Umsatz, Auswertung der
-  Sofort-Einstiege in der Wochenstatistik, Alpacas Nachrichtenstrom aus dem Handel nehmen (ab 23.11.).
+  zweiten Modells, abendliche Prüfung jeder Ausführung gegen den echten Umsatz, Alpacas
+  Nachrichtenstrom aus dem Handel nehmen (ab 23.11.).
 - Noch nie am echten Konto gelaufen sind: Ziel-Order und ihr Streichen vor dem Ausstieg, Ausstieg bei
   Stop und Zeitlimit, Leerverkauf vor und nach der Börse. Bei den ersten Trades die Protokolle prüfen.
 

@@ -25,6 +25,15 @@ def default_week(today: date):
     return week_of(today if today.weekday() >= 4 else today - timedelta(days=7))
 
 
+NIGHT_UNTIL_H = "04"   # UTC. The session after the close ends at 20:00 in New York, which is 0:00 or 1:00 UTC of the next day.
+
+
+def trading_day(ts):
+    """The trading day a UTC time belongs to: what happens after midnight UTC is still the evening before."""
+    day = date.fromisoformat(ts[:10])
+    return (day - timedelta(days=1) if ts[11:13] < NIGHT_UNTIL_H else day).isoformat()
+
+
 def read_jsonl(path):
     if not path.exists():
         return []
@@ -107,6 +116,7 @@ def trade_stats(trades):
 
 
 IMPACT = {0: "kaum", 1: "mittel", 2: "groß", 3: "sehr groß"}
+DIRECTION = {"up": "steigt", "down": "fällt"}
 
 
 def outcome_stats(rows):
@@ -264,11 +274,92 @@ def model_stats(classified, shadows, fallbacks, outcomes, limits):
     return out
 
 
+def fast_limits(root):
+    """The thresholds a rating of the immediate entry must reach to be traded, from config.toml."""
+    try:
+        import tomllib
+        f = tomllib.loads((root / "config.toml").read_text(encoding="utf-8"))["fast"]
+        return f["min_surprise"], f["min_confidence"], f["min_impact"]
+    except Exception:
+        return 7, 7, 1
+
+
+def fast_stats(rated, speed, skipped, rejected, limits):
+    """The ratings of the immediate entry against what the price did after the same announcement.
+
+    Every rating is logged, with or without a trade. The price path is the nightly measurement of
+    the same press release (news_speed carries the same id). "Right" means: after 5 minutes the
+    price was on the predicted side of the price before the announcement. That says whether the KI
+    reads announcements correctly. It does not say that a trade would have paid: what a late order
+    gets, and what the spread costs, is another matter (memory/strategy.md, "Dritte Auswertung").
+    """
+    min_surprise, min_confidence, min_impact = limits
+
+    def med(xs):
+        xs = sorted(x for x in xs if x is not None)
+        return round(xs[len(xs) // 2], 1) if xs else None
+
+    def avg(xs):
+        xs = [x for x in xs if x is not None]
+        return round(sum(xs) / len(xs), 2) if xs else None
+
+    path = {(r.get("src"), r.get("ref")): r for r in speed if not r.get("skipped") and r.get("r300") is not None}
+    after = lambda e: path.get((e.get("source"), e.get("article")))
+    direction = lambda e: (e.get("verdict") or {}).get("direction")
+    sign = lambda e: 1 if direction(e) == "up" else -1
+    # a move someone could have traded: the stock was trading before, moved, and had volume (as in the speed section)
+    mover = lambda r: (r.get("ref_age_s") or 0) <= FRESH_REF_S and abs(r["r300"]) >= MOVER_PCT and usd_300(r) >= LIQUID_USD
+
+    def candidate(e):
+        v = e.get("verdict") or {}
+        return v.get("direction") in ("up", "down") and (v.get("surprise") or 0) >= min_surprise \
+            and (v.get("confidence") or 0) >= min_confidence and (v.get("impact") or 0) >= min_impact
+
+    def group(rows):
+        seen = [(e, after(e)) for e in rows if after(e)]
+        moved = [(e, r) for e, r in seen if mover(r)]
+        later = [(e, r) for e, r in seen if r.get("r900") is not None]
+        return {
+            "n": len(rows), "measured": len(seen),
+            "right_5": sum(1 for e, r in seen if r["r300"] * sign(e) > 0),
+            "wrong_5": sum(1 for e, r in seen if r["r300"] * sign(e) < 0),
+            "flat_5": sum(1 for e, r in seen if r["r300"] == 0),
+            "dir_move_5": avg(r["r300"] * sign(e) for e, r in seen),
+            "measured_15": len(later),
+            "right_15": sum(1 for e, r in later if r["r900"] * sign(e) > 0),
+            "dir_move_15": avg(r["r900"] * sign(e) for e, r in later),
+            "movers": len(moved), "movers_right": sum(1 for e, r in moved if r["r300"] * sign(e) > 0),
+            "examples": [{"symbol": e.get("symbol"), "direction": direction(e), "r60": r.get("r60"), "r300": r["r300"],
+                          "r900": r.get("r900"), "headline": (e.get("headline") or "")[:90]}
+                         for e, r in sorted(seen, key=lambda p: -abs(p[1]["r300"]))[:8]],
+        }
+
+    directed = [e for e in rated if direction(e) in ("up", "down")]
+    quiet = [e for e in rated if direction(e) == "none" and after(e)]
+    cost = 0.0
+    for e in rated:
+        pin, pout = PRICES.get(e.get("model"), (0.0, 0.0))
+        cost += ((e.get("tokens_in") or 0) * pin + (e.get("tokens_out") or 0) * pout) / 1e6
+    return {
+        "rated": len(rated), "limits": list(limits),
+        "with_text": sum(1 for e in rated if e.get("with_text")),
+        "with_expectations": sum(1 for e in rated if e.get("with_expectations")),
+        "age_s_median": med(e.get("age_s") for e in rated), "seconds_median": med(e.get("model_s") for e in rated),
+        "cost": round(cost, 2),
+        "by_session": dict(Counter(SESSIONS.get(e.get("phase"), e.get("phase") or "?") for e in rated)),
+        "directed": group(directed), "candidates": group([e for e in directed if candidate(e)]),
+        "none": {"n": sum(1 for e in rated if direction(e) == "none"), "measured": len(quiet),
+                 "moved_anyway": sum(1 for e in quiet if mover(after(e)))},
+        "skipped": dict(Counter(e.get("reason", "?") for e in skipped).most_common()),
+        "rejected": dict(Counter(e.get("reason", "?") for e in rejected).most_common()),
+    }
+
+
 def build(root: Path, start: date, end: date):
     days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
     trades = apply_corrections(
         [t for t in read_jsonl(root / "logs" / "trades.jsonl")
-         if start.isoformat() <= t["entry_time"][:10] <= end.isoformat()],
+         if start.isoformat() <= t["entry_time"][:10] <= end.isoformat() or trading_day(t["entry_time"]) == end.isoformat()],
         read_jsonl(root / CORRECTIONS),
     )
     events, daily = [], []
@@ -280,6 +371,11 @@ def build(root: Path, start: date, end: date):
             row = json.loads(p.read_text())
             row["equity_start"], row["pnl"] = day_result(row, of_day)
             daily.append(row)
+    # Trading runs into the evening: the last hour of Friday's session and the measurement of
+    # Friday's announcements are written after midnight UTC, into Saturday's file.
+    later = [read_jsonl(root / "logs" / f"events-{(end + timedelta(days=i)).isoformat()}.jsonl") for i in (1, 2)]
+    night = lambda e: (e.get("t") or "9")[11:13] < NIGHT_UNTIL_H
+    events += [e for e in later[0] if night(e)]
 
     by_strategy = defaultdict(list)
     for t in trades:
@@ -292,6 +388,9 @@ def build(root: Path, start: date, end: date):
     classified = [e for e in events if e["kind"] == "news_classified"]
     outcomes = [e for e in events if e["kind"] == "news_outcome"]
     speed = [e for e in events if e["kind"] == "news_speed"]
+    # a measurement that ran late (it gives up for the night when the data source refuses) still belongs to this week
+    speed += [e for e in [x for x in later[0] if not night(x)] + later[1]
+              if e.get("kind") == "news_speed" and e.get("t0") and trading_day(e["t0"]) <= end.isoformat()]
     shadows = [e for e in events if e["kind"] == "news_shadow"]
     fallbacks = [e for e in events if e["kind"] == "news_fallback"]
     news_trades = by_strategy.get("news", [])
@@ -346,6 +445,13 @@ def build(root: Path, start: date, end: date):
                           for src in sorted({o.get("source") or "?" for o in outcomes})},
         },
         "models": model_stats(classified, shadows, fallbacks, outcomes, news_limits(root)),
+        "fast": {
+            **fast_stats([e for e in events if e["kind"] == "fast_rated"], speed,
+                         [e for e in events if e["kind"] == "fast_skipped"],
+                         [e for e in events if e["kind"] == "fast_rejected"], fast_limits(root)),
+            "trades_by_session": {SESSIONS.get(k, k): trade_stats([t for t in by_strategy.get("fast", []) if t.get("phase") == k])
+                                  for k in sorted({t.get("phase") or "?" for t in by_strategy.get("fast", [])})},
+        },
         "news_by_model": {
             m: trade_stats([t for t in news_trades if (t.get("meta", {}).get("model") or "?") == m])
             for m in sorted({t.get("meta", {}).get("model") or "?" for t in news_trades})
@@ -437,6 +543,40 @@ def markdown(r):
                 out.append(f'  - {x["symbol"]} ({mv}): {x["headline"][:90]} | '
                            + " | ".join(f"{m}: {v}" for m, v in x["verdicts"].items()))
         out += [f"- Trades nach Entscheidung von {k}: {fmt(v)}" for k, v in r["news_by_model"].items()]
+
+    fa = r["fast"]
+    if fa["rated"]:
+        lim = fa["limits"]
+
+        def fg(g):
+            if not g["n"]:
+                return "keine"
+            if not g["measured"]:
+                return f'{g["n"]}, Kursverlauf noch nicht gemessen'
+            late = (f'; nach 15 Minuten richtig {g["right_15"]} von {g["measured_15"]} (im Schnitt {g["dir_move_15"]:+.2f} %)'
+                    if g["measured_15"] else "")
+            return (f'{g["n"]}, davon {g["measured"]} mit gemessenem Kursverlauf: Richtung nach 5 Minuten richtig {g["right_5"]}, '
+                    f'falsch {g["wrong_5"]}, ohne Bewegung {g["flat_5"]} (im Schnitt {g["dir_move_5"]:+.2f} % in vorhergesagter '
+                    f'Richtung){late}; bei handelbaren Ausschlägen richtig {g["movers_right"]} von {g["movers"]}')
+        out += ["", "## Sofort-Einstieg: Bewertungen gegen den Kursverlauf (jede Bewertung, auch ohne Trade)",
+                "(Richtig heißt: Der Kurs lag danach auf der vorhergesagten Seite des Kurses vor der Meldung. Ob ein Trade sich "
+                f"gelohnt hätte, sagt das nicht. Handelbarer Ausschlag: mindestens {MOVER_PCT:g} % und "
+                + f"{LIQUID_USD:,} $ Umsatz in 5 Minuten.)".replace(",", "."),
+                f'- bewertet: {fa["rated"]} Pressemitteilungen {fa["by_session"]}, {fa["with_text"]} mit vollem Text, '
+                f'{fa["with_expectations"]} mit Erwartungen; Alter beim Eintreffen {fa["age_s_median"]} s, Antwortzeit '
+                f'{fa["seconds_median"]} s, Kosten {fa["cost"]} $',
+                f'- Bewertungen mit Richtung: {fg(fa["directed"])}',
+                f'- Kandidaten (Überraschung >= {lim[0]}, Sicherheit >= {lim[1]}, Wirkung >= {lim[2]}): {fg(fa["candidates"])}',
+                f'- ohne Richtung bewertet: {fa["none"]["n"]}, davon {fa["none"]["measured"]} gemessen; trotzdem ein '
+                f'handelbarer Ausschlag bei {fa["none"]["moved_anyway"]}',
+                f'- nicht bewertet (Grund): {fa["skipped"] or "keine"}',
+                f'- Kandidaten ohne Einstieg (Grund): {fa["rejected"] or "keine"}']
+        out += [f'- Trades {k}: {fmt(v)}' for k, v in fa["trades_by_session"].items()]
+        if fa["directed"]["examples"]:
+            out.append("- Bewertungen mit Richtung, größte Bewegung zuerst (Kurs nach 1 / 5 / 15 Minuten):")
+            pc = lambda v: "?" if v is None else f"{v:+.2f} %"
+            out += [f'  - {e["symbol"]} {DIRECTION.get(e["direction"], e["direction"])}: {pc(e["r60"])} / {pc(e["r300"])} / '
+                    f'{pc(e["r900"])} | {e["headline"]}' for e in fa["directed"]["examples"]]
 
     def fs(o):
         thin = f' (dazu {o["thin"]} ohne Handel in den 10 Minuten davor)' if o.get("thin") else ""

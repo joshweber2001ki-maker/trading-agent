@@ -523,8 +523,10 @@ das zeigt der erste ausgeführte Trade (`price_changes`, Ausstiegsgrund).
    etwas, weil die Bewegung dann zu 87 % gelaufen ist.
 5. Die Trefferquote der KI ist die Zahl, die jetzt fehlt. Sie lässt sich ohne Handel und ohne schnelle
    Quelle messen: Jede Bewertung des Sofort-Einstiegs wird protokolliert (`fast_rated`) und in der Nacht
-   gegen den Kursverlauf gelegt. Erst wenn sie über den Schwellen aus der Tabelle liegt, lohnen die
-   Ausgaben für RTPR und Kurse.
+   gegen den Kursverlauf gelegt; die Wochenstatistik zählt das seit dem 20.11. aus (Abschnitt
+   „Sofort-Einstieg“). Erst wenn sie über den Schwellen aus der Tabelle liegt, lohnen die Ausgaben für
+   RTPR und Kurse. Stand nach dem ersten Abend: sechs Bewertungen mit Richtung, nach 5 Minuten zwei
+   richtig, drei falsch, eine ohne Bewegung; das sagt noch nichts.
 
 **Kommt die Meldung bei der SEC früher an als die Pressemitteilung?** Nein. Zu 17 Pflichtmitteilungen
 über Ergebnisse (8-K, Punkt 2.02) vom 17. bis 19.11. gab es eine Pressemitteilung derselben Firma
@@ -536,7 +538,7 @@ Die SEC als zweite Quelle macht den Sofort-Einstieg bei Quartalszahlen also nich
 für Meldungen ohne Pressemitteilung. Die eine Ausnahme war Natural Grocers am 19.11.
 
 **Erster Abend der ersten Fassung (19.11., 22:07 bis 1:45 Uhr deutscher Zeit).** 110 Pressemitteilungen
-kamen an, 39 wurden bewertet (alle mit vollem Text, 9 mit Erwartungen), typisch 1,6 Sekunden je Bewertung,
+kamen an, 39 wurden bewertet (alle mit vollem Text, 9 mit Erwartungen), typisch 1,5 Sekunden je Bewertung,
 zusammen 0,40 $. Ein Kandidat: Natural Grocers, Leerverkauf, weil Gewinn und Umsatz unter der Erwartung
 lagen. Die Zahlen lagen seit 22:05:11 Uhr bei der SEC, die Pressemitteilung trägt 22:10:00 Uhr und kam
 um 22:11:20 Uhr beim Bot an. Da stand der Geldkurs schon bei 25,20 $ gegen 27,15 $ vorher, also 7 %

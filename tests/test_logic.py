@@ -1093,6 +1093,75 @@ def test_weekly_stats_compare_the_models_on_the_same_articles(tmp_path):
     assert "## Modellvergleich" in md and "uneinig bei 2 Meldungen" in md and f"{O} 1, {H} 2, {S} 1" in md
 
 
+def test_weekly_stats_set_the_ratings_of_the_immediate_entry_against_the_price(tmp_path):
+    """Every rating of the immediate entry is compared with the price path measured for the same press
+    release in the night. Friday's evening session and its measurement end up in Saturday's file."""
+    logs = tmp_path / "logs"
+    logs.mkdir(parents=True)
+    (tmp_path / "config.toml").write_text("[news]\nmin_surprise = 7\nmin_confidence = 6\nmin_impact = 1\n"
+                                          "[fast]\nmin_surprise = 7\nmin_confidence = 7\nmin_impact = 1\n")
+    v = lambda d, s=8, i=2, c=8: {"symbol": "ACME", "direction": d, "surprise": s, "impact": i, "confidence": c}
+
+    def rated(t, article, verdict, **kw):
+        return {"t": t, "kind": "fast_rated", "article": article, "source": "prnewswire", "symbol": "ACME",
+                "headline": "Headline " + article, "phase": "post", "age_s": 120, "verdict": verdict,
+                "model": "claude-opus-5-5", "model_s": 1.5, "tokens_in": 2000, "tokens_out": 100, "with_text": True, **kw}
+
+    def path(t, article, t0, r300, r900=None, usd=500000, **kw):
+        return {"t": t, "kind": "news_speed", "src": "prnewswire", "ref": article, "symbol": "ACME", "t0": t0,
+                "session": "post", "ref_age_s": 30, "r60": r300 / 2, "r300": r300, "r900": r900, "usd_60_300": usd, **kw}
+
+    friday = [rated("2026-11-20T21:10:00Z", "a", v("down"), with_expectations=True),       # a candidate, and right
+              rated("2026-11-20T21:11:00Z", "b", v("up", 5, 1, 5)),                         # a direction, below the thresholds
+              rated("2026-11-20T21:12:00Z", "c", v("none", 1, 0, 3)),                       # nothing expected, and it moved
+              rated("2026-11-20T21:13:00Z", "e", v("up")),                                  # never measured
+              {"t": "2026-11-20T21:14:00Z", "kind": "fast_skipped", "reason": "stale"},
+              {"t": "2026-11-20T21:14:01Z", "kind": "fast_skipped", "reason": "stale"},
+              {"t": "2026-11-20T21:15:00Z", "kind": "fast_rejected", "reason": "no_reference"}]
+    saturday = [rated("2026-11-21T00:20:00Z", "d", v("up")),                               # 19:20 in New York, still Friday
+                {"t": "2026-11-21T00:30:00Z", "kind": "error", "where": "fast"},
+                path("2026-11-21T01:30:00Z", "a", "2026-11-20T21:08:00Z", -2.0, -1.0),
+                path("2026-11-21T01:30:01Z", "b", "2026-11-20T21:09:00Z", -0.5, 0.2, usd=2000),
+                path("2026-11-21T01:30:02Z", "c", "2026-11-20T21:10:00Z", 3.0, 3.0),
+                path("2026-11-21T01:30:03Z", "d", "2026-11-21T00:18:00Z", 0.0),
+                {"t": "2026-11-21T01:30:04Z", "kind": "news_speed", "src": "prnewswire", "ref": "e", "skipped": "market_closed"},
+                # Saturday proper: not part of the week
+                {"t": "2026-11-21T09:00:00Z", "kind": "error", "where": "wires"},
+                rated("2026-11-21T09:00:00Z", "weekend", v("up")),
+                # a measurement that ran late still counts, by the time of the announcement
+                path("2026-11-21T09:30:00Z", "late", "2026-11-20T15:00:00Z", 1.5),
+                path("2026-11-21T09:30:01Z", "next", "2026-11-21T08:00:00Z", 1.5)]
+    (logs / "events-2026-11-20.jsonl").write_text("\n".join(json.dumps(e) for e in friday))
+    (logs / "events-2026-11-21.jsonl").write_text("\n".join(json.dumps(e) for e in saturday))
+    trade = {"strategy": "fast", "symbol": "ACME", "side": "long", "pnl": -40, "r": -0.4, "hold_min": 3, "slippage_pct": 0.3,
+             "notional": 9000, "exit_reason": "stop", "style": "soft", "phase": "post", "meta": {}}
+    (logs / "trades.jsonl").write_text("\n".join(json.dumps(dict(trade, entry_time=t)) for t in
+                                                  ("2026-11-21T00:21:00Z", "2026-11-21T09:00:00Z", "2026-11-14T00:21:00Z")))
+    r = build(tmp_path, *week_of(datetime(2026, 11, 20).date()))
+    fa = r["fast"]
+    assert (fa["rated"], fa["with_text"], fa["with_expectations"], fa["by_session"]) == (5, 5, 1, {"nachbörslich": 5})
+    assert (fa["age_s_median"], fa["seconds_median"], fa["cost"], fa["limits"]) == (120, 1.5, 0.05, [7, 7, 1])
+    d = fa["directed"]
+    assert (d["n"], d["measured"], d["right_5"], d["wrong_5"], d["flat_5"], d["dir_move_5"]) == (4, 3, 1, 1, 1, 0.5)
+    assert (d["measured_15"], d["right_15"], d["dir_move_15"]) == (2, 2, 0.6)
+    assert (d["movers"], d["movers_right"]) == (1, 1)                 # b fell without volume: nothing anyone could trade
+    assert [x["symbol"] for x in d["examples"]] == ["ACME"] * 3 and d["examples"][0]["r300"] == -2.0
+    c = fa["candidates"]
+    assert (c["n"], c["measured"], c["right_5"], c["wrong_5"], c["flat_5"]) == (3, 2, 1, 0, 1)
+    assert fa["none"] == {"n": 1, "measured": 1, "moved_anyway": 1}
+    assert fa["skipped"] == {"stale": 2} and fa["rejected"] == {"no_reference": 1}
+    assert r["errors"] == {"fast": 1}                                  # Saturday morning's error belongs to no trading day
+    assert r["by_strategy"]["fast"]["n"] == 1 and fa["trades_by_session"]["nachbörslich"]["pnl"] == -40
+    assert r["speed"]["all"]["n"] == 5                                 # a, b, c, d and the one measured late; not Saturday's own
+    md = markdown(r)
+    assert "## Sofort-Einstieg: Bewertungen gegen den Kursverlauf" in md
+    assert "Richtung nach 5 Minuten richtig 1, falsch 1, ohne Bewegung 1" in md and "ACME fällt: -1.00 % / -2.00 % / -1.00 %" in md
+    # a week without the immediate entry: no section, and nothing breaks
+    empty = build(tmp_path, *week_of(datetime(2026, 11, 11).date()))
+    assert empty["fast"]["rated"] == 0 and "## Sofort-Einstieg" not in markdown(empty)
+    assert empty["by_strategy"]["fast"]["n"] == 1                      # entered on the 14th at 0:21 UTC: Friday evening of that week
+
+
 # ── the whole program against a simulated broker ─────────────────────────────
 def test_bot_starts_lists_filings_and_measures_after_the_close_without_trading(tmp_path, monkeypatch):
     """Start, begin the day, list SEC filings, run both measurements after the close, write the
