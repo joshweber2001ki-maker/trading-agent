@@ -10,6 +10,7 @@ and which further data the plan includes or refuses. The key itself is never pri
 import asyncio
 import json
 import sys
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -31,6 +32,11 @@ EXTRAS = [
     ("Umsatz-Schätzungen kommender Quartale", "/stock/revenue-estimate", {"symbol": PROBE, "freq": "quarterly"}),
     ("Kursziele der Analysten", "/stock/price-target", {"symbol": PROBE}),
     ("Hoch- und Herabstufungen", "/stock/upgrade-downgrade", {"symbol": PROBE}),
+    # Josh's question of 19.11.: does the free plan still hand out candles (it did in earlier years)?
+    ("Kerzen: letzte 200 Minuten", "/stock/candle", {"symbol": PROBE, "resolution": "1",
+                                                     "from": int(time.time()) - 200 * 60, "to": int(time.time())}),
+    ("Kerzen: letzte 50 Tage", "/stock/candle", {"symbol": PROBE, "resolution": "D",
+                                                 "from": int(time.time()) - 50 * 86400, "to": int(time.time())}),
 ]
 
 
@@ -38,6 +44,8 @@ def size(d):
     if isinstance(d, list):
         return len(d)
     if isinstance(d, dict):
+        if "s" in d and ("t" in d or d.get("s") == "no_data"):      # candles: {"s": "ok", "t": [...], ...}
+            return len(d.get("t") or [])
         for key in ("data", "metric", "earningsCalendar"):
             if isinstance(d.get(key), (list, dict)):
                 return len(d[key])
@@ -85,10 +93,11 @@ async def main(as_json=False):
     out["examples"] = [{k: r.get(k) for k in ("symbol", "date", "hour", "epsEstimate", "revenueEstimate")} for r in best]
     out["extras"] = {}
     for label, path, params in EXTRAS:
+        key = path + (f"?resolution={params['resolution']}" if "resolution" in params else "")
         try:
-            out["extras"][path] = {"label": label, "ok": True, "size": size(await fh.get(path, **params))}
+            out["extras"][key] = {"label": label, "ok": True, "size": size(await fh.get(path, **params))}
         except FinnhubError as e:
-            out["extras"][path] = {"label": label, "ok": False, "status": e.status}
+            out["extras"][key] = {"label": label, "ok": False, "status": e.status}
     out["calls_per_minute"] = fh.plan_limit
     if as_json:
         print(json.dumps(out, indent=1, ensure_ascii=False))

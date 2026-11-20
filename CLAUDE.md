@@ -94,18 +94,21 @@ Worten in `memory/strategy.md`, „Erste Fassung im Handel“. Jede Änderung da
 
 **Befund vom 20.11. (noch ohne Entscheidung von Josh):** Vor und nach der Börse liegt die Spanne
 zwischen Geld- und Briefkurs direkt nach einer Meldung typisch bei 2 bis 4 %, die Bewegung in 5 Minuten
-bei 2,2 %. Mit den Regeln der ersten Fassung endet ein ausgeführter Trade dort meist sofort am Stop.
-Vorschlag an Josh: dort nur einsteigen, wenn der Bot vorher Geld- und Briefkurs kennt (Probe-Order über
+bei 2,2 %. Am gemessenen Kursverlauf durchgespielt verliert die erste Fassung dort im Schnitt auch dann,
+wenn die Richtung jedes Mal stimmt (−0,4 bis −1,3 % je Trade, jeder zweite bis dritte endet am Stop).
+Vorschlag an Josh: dort nur einsteigen, wenn der Bot vorher Geld- und Briefkurs kennt (Probe über
 1 Aktie oder Datenpaket) und die Spanne höchstens 0,5 % beträgt; Sofort-Einstieg auch in der
-Handelszeit, wo die Spanne klein ist. Zahlen: `memory/strategy.md`, „Dritte Auswertung“.
+Handelszeit, wo die Spanne klein ist. Dann muss die KI vor und nach der Börse in etwa zwei von drei
+Fällen richtig liegen, in der Handelszeit in jedem zweiten. Zahlen: `memory/strategy.md`, „Dritte Auswertung“.
 
 **Was noch fehlt**
 - Schnelle Quelle: RTPR (Pressemitteilungen in unter einer Sekunde, 139 $ im Monat nach sieben
   Probetagen). Josh hat den Start noch nicht entschieden; geplant wird mit dem 30.11. Ohne sie
   entstehen wenige Trades, weil der Kurs bei verspäteten Meldungen meist schon gelaufen ist.
-- SEC-Meldungen als zweite Quelle für den Sofort-Einstieg (Text der Anlage holen). Die SEC-Liste
-  bekam am 19.11. ab 6:00 Uhr New Yorker Zeit keine Antwort mehr vom Dienst der SEC (nur diese eine
-  Adresse; der Server ist nicht gesperrt); der Bot holt bis zu anderthalb Tage nach.
+- SEC-Meldungen als zweite Quelle für den Sofort-Einstieg (Text der Anlage holen): nachrangig, denn bei
+  Quartalszahlen ist die Pressemitteilung fast immer zuerst da (16 von 17 Fällen, im Median 205 Sekunden).
+  Die SEC-Liste bekam am 19.11. ab 6:00 Uhr New Yorker Zeit keine Antwort mehr vom Dienst der SEC (nur
+  diese eine Adresse; der Server ist nicht gesperrt); der Bot holt bis zu anderthalb Tage nach.
 - Dossiers über die Erwartungen hinaus (Prognose der Firma, Kursverlauf davor), zweite Meinung eines
   zweiten Modells, abendliche Prüfung jeder Ausführung gegen den echten Umsatz, Auswertung der
   Sofort-Einstiege in der Wochenstatistik, Alpacas Nachrichtenstrom aus dem Handel nehmen (ab 23.11.).

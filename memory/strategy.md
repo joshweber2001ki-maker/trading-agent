@@ -464,29 +464,85 @@ eng und der Kurs noch nicht gelaufen ist.
 ausgeführt statt 11-mal (Einstieg nach 60 Sekunden) und verliert im Median 2,6 %. Eine Limit-Order wird
 eben dann ausgeführt, wenn der Kurs auf sie zuläuft, also gegen die Bewertung. Bei richtiger Bewertung
 kommt nur jeder sechste Einstieg zustande, bei falscher zwei von drei. Ohne Blick auf Geld- und Briefkurs
-VOR dem Einstieg rechnet sich das erst ab einer Trefferquote um 90 %.
+VOR dem Einstieg rechnet sich das erst ab einer Trefferquote von rund 85 % (mit den Durchschnitten
+gerechnet: +3,3 % je Treffer, −5,7 % je Fehlgriff; 5 Minuten gehalten, ohne Stop, und nur Aktien, die
+sich danach wirklich um mindestens 1 % bewegt haben).
+
+**Die Regeln der ersten Fassung am gemessenen Verlauf durchgespielt.** Für dieselben 64 Fälle: Einstieg
+5 oder 60 Sekunden nach der Meldung mit dem Limit der ersten Fassung, Ausführung zum Briefkurs
+(Leerverkauf zum Geldkurs), sofort raus bei Gegenbewegung, Stop und Ziel ab Ausführung, Zeitlimit 10
+oder 15 Minuten, Regel „blind“. Der Kurs der Position ist dabei der letzte Handelskurs alle 5 Sekunden
+(nach 5 Minuten: Minutenkerzen). Zwei Annahmen für den Ausstieg: vorsichtig (immer zum Geldkurs, also
+letzter Kurs minus halbe Spanne) und günstig (Stop zum auslösenden Kurs, Ziel sobald der letzte Kurs es
+erreicht). Wirkung 2 heißt: Limit 2,5 %, Stop 1,5 %, Ziel 3 %.
+
+| Wirkung 2, 64 Fälle | Ausführungen | Schnitt je Trade, vorsichtig | günstig | am Stop | im Plus |
+|---|---|---|---|---|---|
+| Richtung richtig, Einstieg nach 5 s | 36 | −0,9 % | −0,4 % | 13 | 15 |
+| Richtung richtig, Einstieg nach 60 s | 37 | −1,3 % | −0,6 % | 18 | 14 |
+| Richtung falsch, Einstieg nach 5 s | 53 | −3,7 % | −2,4 % | 42 | 3 |
+| Richtung falsch, Einstieg nach 60 s | 55 | −3,7 % | −2,5 % | 38 | 3 |
+
+Wirkung 1 (Limit 1 %, Stop 0,75 %, Ziel 1 %): bei richtiger Richtung −0,5 bis +0,1 % je Trade, bei
+falscher −2,6 bis −4,1 %. Wirkung 3 (Limit 5 %, Stop 3 %, Ziel 6 %): −0,4 bis −2,4 % und −3,2 bis −4,7 %.
+Die erste Fassung verliert vor und nach der Börse also im Schnitt auch dann, wenn die KI jedes Mal
+richtig liegt: Der Kauf zum Briefkurs liegt um die halbe Spanne über dem letzten Kurs, die Kurse springen
+zwischen Geld- und Briefseite, und jeder zweite bis dritte Trade endet am Stop, obwohl die Richtung
+stimmte. Etwa jeder fünfte liegt schon im Moment der Ausführung am Stop (7 bis 8 von rund 36).
+
+**Dieselbe Rechnung mit Blick auf die Spanne** (Einstieg nur, wenn die Spanne im Moment des Einstiegs
+höchstens 0,5 % beträgt und der Kurs höchstens 0,5 % gegen die Bewertung gelaufen ist; Wirkung 2):
+
+| | Ausführungen in 5 Tagen | Schnitt, Richtung richtig | Schnitt, Richtung falsch | plus/minus null ab Trefferquote |
+|---|---|---|---|---|
+| vor und nach der Börse, nach 5 s | 7 | +1,0 % | −1,9 bis −2,3 % | 61 bis 65 % |
+| vor und nach der Börse, nach 60 s | 9 | +0,6 % | −1,6 bis −1,7 % | 65 bis 67 % |
+| Handelszeit, nach 5 s | 5 | +2,0 % | −1,6 bis −1,7 % | 44 bis 45 % |
+| Handelszeit, nach 60 s | 4 | +1,9 % | −1,6 bis −1,7 % | 52 bis 53 % |
+
+Das sind sehr wenige Fälle aus fünf Tagen, also nur ein Anhalt. Die Richtung ist auch hier nachträglich
+bekannt, und es zählen nur Aktien, die sich danach bewegt haben. Lässt man die Spanne bis 1 % zu, sind
+es vor und nach der Börse 14 bis 16 Ausführungen und die nötige Trefferquote liegt bei 55 bis 78 %.
+Nicht geprüft ist die Annahme, dass der Broker die offene Position zum letzten Handelskurs bewertet;
+das zeigt der erste ausgeführte Trade (`price_changes`, Ausstiegsgrund).
 
 **Folgerungen**
-1. Die erste Fassung (Limit bis zur halben erwarteten Bewegung, Stop 1,5 bis 3 % ab Ausführung) passt
-   nicht zu diesen Spannen: Wer bei 3 % Spanne zum Briefkurs kauft, liegt sofort um die halbe Spanne
-   hinter dem letzten Kurs, der Stop greift gleich, und der Ausstieg zum Geldkurs kostet die andere Hälfte.
+1. Die erste Fassung kann vor und nach der Börse kein Geld verdienen, unabhängig von der Güte der
+   Bewertung. Limit, Stop und Ziel sind kleiner als die Spanne, über die sie hinwegmüssen.
 2. Vor und nach der Börse braucht der Bot vor dem Einstieg Geld- und Briefkurs: handeln nur bei enger
    Spanne (höchstens 0,5 %) und nur, wenn der Kurs weder davongelaufen noch gegen die Bewertung gelaufen
-   ist. Das geht mit Alpacas Datenpaket (99 $ im Monat) oder kostenlos mit einer Probe-Order über 1 Aktie
-   (das Paper-Konto führt sie zum echten Brief- und Geldkurs aus, siehe Versuch vom 19.11.).
-3. In der Handelszeit ist die Spanne kein Problem. Dort gilt bisher die alte Regel mit Kursbestätigung
-   (kein Trade seit dem 17.11.); der Sofort-Einstieg läuft dort noch nicht.
-4. Größenordnung: Vor und nach der Börse sind es rund drei brauchbare Fälle am Tag mit etwa +1,3 %
-   bei richtiger Richtung. Bei 10.000 $ je Position sind das etwa 130 $ je Treffer und rund 260 $ je
-   Fehlgriff. Gegen 139 $ für RTPR und 99 $ für Kurse im Monat ist das wenig, selbst wenn die KI gut trifft.
+   ist. Das geht mit Alpacas Datenpaket (99 $ im Monat) oder kostenlos mit einer Probe über 1 Aktie
+   (Kauf und sofortiger Verkauf: das Paper-Konto führt zum echten Brief- und Geldkurs aus, siehe Versuch
+   vom 19.11.). Dann muss die KI in etwa zwei von drei Fällen richtig liegen.
+3. In der Handelszeit ist die Spanne kein Problem, und dort genügt etwa jeder zweite Treffer. Dort gilt
+   bisher nur die alte Regel mit Kursbestätigung (kein Trade seit dem 17.11.); der Sofort-Einstieg
+   läuft dort noch nicht.
+4. Größenordnung mit schneller Quelle: vor und nach der Börse ein bis zwei Fälle am Tag mit enger Spanne,
+   in der Handelszeit etwa einer. Bei 10.000 $ je Position bringt ein Treffer etwa 60 bis 200 $, ein
+   Fehlgriff kostet etwa 160 bis 230 $. Mit der jetzigen Quelle (zwei Minuten zu spät) bleibt davon kaum
+   etwas, weil die Bewegung dann zu 87 % gelaufen ist.
+5. Die Trefferquote der KI ist die Zahl, die jetzt fehlt. Sie lässt sich ohne Handel und ohne schnelle
+   Quelle messen: Jede Bewertung des Sofort-Einstiegs wird protokolliert (`fast_rated`) und in der Nacht
+   gegen den Kursverlauf gelegt. Erst wenn sie über den Schwellen aus der Tabelle liegt, lohnen die
+   Ausgaben für RTPR und Kurse.
+
+**Kommt die Meldung bei der SEC früher an als die Pressemitteilung?** Nein. Zu 17 Pflichtmitteilungen
+über Ergebnisse (8-K, Punkt 2.02) vom 17. bis 19.11. gab es eine Pressemitteilung derselben Firma
+innerhalb einer Stunde; 16-mal war die Pressemitteilung zuerst da. Die SEC nahm das 8-K im Median
+205 Sekunden nach dem Zeitstempel der Pressemitteilung an (mittlere Hälfte: 112 bis 646 Sekunden). Dazu
+kommt, dass die Liste der SEC neue Meldungen beim Bot im Median erst 305 Sekunden nach der Annahme zeigt
+(358 Meldungen, schnellste 27 Sekunden); PR Newswire kommt im Median nach 115 Sekunden (382 Meldungen).
+Die SEC als zweite Quelle macht den Sofort-Einstieg bei Quartalszahlen also nicht schneller; sie bleibt
+für Meldungen ohne Pressemitteilung. Die eine Ausnahme war Natural Grocers am 19.11.
 
 **Erster Abend der ersten Fassung (19.11., 22:07 bis 1:45 Uhr deutscher Zeit).** 110 Pressemitteilungen
 kamen an, 39 wurden bewertet (alle mit vollem Text, 8 mit Erwartungen), typisch 1,6 Sekunden je Bewertung,
 zusammen 0,40 $. Ein Kandidat: Natural Grocers, Leerverkauf, weil Gewinn und Umsatz unter der Erwartung
-lagen. Die Meldung kam 80 Sekunden verspätet; der Geldkurs stand da bei 25,20 $ gegen 27,15 $ vor der
-Meldung, also 7 % tiefer. Das Limit von 26,53 $ griff nicht, die Order wurde nach 15 Sekunden gestrichen.
-Kein Trade, keine Fehler, Sitzungsende und Tagesabschluss sauber. Von sechs Bewertungen mit Richtung lagen
-nach 5 Minuten zwei richtig; fünf davon waren der KI selbst nicht sicher genug für einen Einstieg.
+lagen. Die Zahlen lagen seit 22:05:11 Uhr bei der SEC, die Pressemitteilung trägt 22:10:00 Uhr und kam
+um 22:11:20 Uhr beim Bot an. Da stand der Geldkurs schon bei 25,20 $ gegen 27,15 $ vorher, also 7 %
+tiefer. Das Limit von 26,53 $ griff nicht, die Order wurde nach 15 Sekunden gestrichen. Die Richtung
+stimmte. Kein Trade, keine Fehler, Sitzungsende und Tagesabschluss sauber. Von sechs Bewertungen mit
+Richtung lagen nach 5 Minuten zwei richtig; fünf der sechs blieben unter den Schwellen für einen Einstieg.
 Die kostenlose Kursquelle zeigte den ganzen Abend bei keiner von 25 Aktien mit Meldung einen brauchbaren
 Kurs. Die SEC-Liste lief ab 22:07 Uhr wieder.
 
@@ -558,5 +614,6 @@ Kurs. Die SEC-Liste lief ab 22:07 Uhr wieder.
   Position vom Broker. Werte im Abschnitt „Erste Fassung im Handel“. Die reguläre Handelszeit und der
   Modelltest bleiben unverändert.
 - 2026-11-20 (Auswertung, keine Änderung am Handel): Spanne vor und nach der Börse gemessen, siehe
-  „Dritte Auswertung“. Befund an Josh gemeldet mit dem Vorschlag, dort nur noch bei bekannter, enger
-  Spanne einzusteigen. Bis zu seiner Entscheidung läuft die erste Fassung wie freigegeben.
+  „Dritte Auswertung“. Die Regeln der ersten Fassung am gemessenen Verlauf durchgespielt: Sie verliert
+  dort auch bei richtiger Richtung. Befund an Josh gemeldet mit dem Vorschlag, dort nur noch bei
+  bekannter, enger Spanne einzusteigen. Bis zu seiner Entscheidung läuft die erste Fassung wie freigegeben.
