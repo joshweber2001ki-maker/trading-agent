@@ -424,6 +424,72 @@ Text abrufbar (1.154 bis 8.078 Zeichen), Kurs vor der Meldung gefunden (bei weni
 vorbörslich ist das der Schlusskurs vom Vortag), Bewertung mit Opus in 1,7 bis 2,8 Sekunden, von der
 Ankunft bis zur Entscheidung 1,8 bis 2,9 Sekunden.
 
+## Dritte Auswertung (20.11.2026): die Spanne, und was sie vom Handel vor und nach der Börse übrig lässt
+
+**Messung.** Für 973 Meldungen vom 13. bis 19.11. hat der Bot in der Nacht zum 20.11. den Geld- und
+Briefkurs des gesamten Marktes 5 und 60 Sekunden nach der Meldung geholt (`news_path`). Der Broker gibt
+diese Kurse kostenlos heraus, sobald sie 15 Minuten alt sind; das war bis dahin ungeprüft. „Handelbarer
+Ausschlag“ heißt wie bisher: mindestens 1 % Bewegung und mindestens 100.000 $ Umsatz in 5 Minuten.
+
+| Sitzung | Meldungen | Spanne nach 5 s (Median) | nach 60 s | Spanne höchstens 0,5 % |
+|---|---|---|---|---|
+| vor Börsenbeginn, alle | 251 | 3,6 % | 3,5 % | 10 % der Fälle |
+| vor Börsenbeginn, handelbare Ausschläge | 29 | 2,8 % | 2,5 % | 13 % |
+| Handelszeit, alle | 188 | 0,33 % | 0,37 % | 55 % |
+| Handelszeit, handelbare Ausschläge | 8 | 0,26 % | 0,26 % | 62 % |
+| nach Börsenschluss, alle | 534 | 4,5 % | 4,4 % | 9 % |
+| nach Börsenschluss, handelbare Ausschläge | 35 | 4,1 % | 2,0 % | 8 % nach 5 s, 14 % nach 60 s |
+
+Auch große Firmen haben vor und nach der Börse direkt nach einer Meldung 2 bis 3 % Spanne. Beispiele
+vom Abend des 19.11.: Natural Grocers 4,9 % (kurz davor 14 %), Globant 11 bis 16 %, Post Holdings 5 %,
+Keysight 1,8 bis 2,1 %, Elastic 1,6 %; eng nur bei Gap (0,5 bis 1,2 %) und Intuit (0,2 bis 1 %).
+
+**Was nach der Spanne bleibt.** Gerechnet für die 64 handelbaren Ausschläge vor und nach der Börse:
+Einstieg zum Briefkurs (Leerverkauf zum Geldkurs), Ausstieg 5 Minuten nach der Meldung zum letzten Kurs
+abzüglich der halben Spanne. Die Richtung ist dabei als bekannt angenommen, es ist also eine Obergrenze.
+
+- Bewegung in 5 Minuten: Median 2,2 %.
+- Einstieg nach 5 Sekunden: es bleiben im Median −0,36 % (30 von 64 im Plus, 19 über +1 %).
+  Einstieg nach 60 Sekunden: −0,60 % (26 von 64 im Plus).
+- In der Handelszeit (8 Fälle): +1,9 % nach 5 Sekunden, +1,45 % nach 60 Sekunden, 8 und 7 von 8 im Plus.
+
+**Enges Limit nachgerechnet** (vor und nach der Börse, Richtung bekannt): Wer höchstens 0,5 % über dem
+Kurs vor der Meldung kauft, wird in 5 Tagen 14-mal ausgeführt (Einstieg nach 5 Sekunden) und ist jedes
+Mal im Plus, Median +1,4 %. Mit 1 % sind es 20 Ausführungen, Median +1,3 %. Mit dem Limit der ersten
+Fassung (2,5 % bei Wirkung 2) sind es 36 Ausführungen, Median +0,7 %, 12 davon im Minus, die schlechteste
+−5,3 %; mit 5 % sind es 54, Median +0,2 %. Das enge Limit wählt also die Fälle aus, in denen die Spanne
+eng und der Kurs noch nicht gelaufen ist.
+
+**Der Haken: Auswahl gegen uns.** Bei FALSCHER Richtung wird dieselbe Order mit 0,5 % Limit 42-mal
+ausgeführt statt 11-mal (Einstieg nach 60 Sekunden) und verliert im Median 2,6 %. Eine Limit-Order wird
+eben dann ausgeführt, wenn der Kurs auf sie zuläuft, also gegen die Bewertung. Bei richtiger Bewertung
+kommt nur jeder sechste Einstieg zustande, bei falscher zwei von drei. Ohne Blick auf Geld- und Briefkurs
+VOR dem Einstieg rechnet sich das erst ab einer Trefferquote um 90 %.
+
+**Folgerungen**
+1. Die erste Fassung (Limit bis zur halben erwarteten Bewegung, Stop 1,5 bis 3 % ab Ausführung) passt
+   nicht zu diesen Spannen: Wer bei 3 % Spanne zum Briefkurs kauft, liegt sofort um die halbe Spanne
+   hinter dem letzten Kurs, der Stop greift gleich, und der Ausstieg zum Geldkurs kostet die andere Hälfte.
+2. Vor und nach der Börse braucht der Bot vor dem Einstieg Geld- und Briefkurs: handeln nur bei enger
+   Spanne (höchstens 0,5 %) und nur, wenn der Kurs weder davongelaufen noch gegen die Bewertung gelaufen
+   ist. Das geht mit Alpacas Datenpaket (99 $ im Monat) oder kostenlos mit einer Probe-Order über 1 Aktie
+   (das Paper-Konto führt sie zum echten Brief- und Geldkurs aus, siehe Versuch vom 19.11.).
+3. In der Handelszeit ist die Spanne kein Problem. Dort gilt bisher die alte Regel mit Kursbestätigung
+   (kein Trade seit dem 17.11.); der Sofort-Einstieg läuft dort noch nicht.
+4. Größenordnung: Vor und nach der Börse sind es rund drei brauchbare Fälle am Tag mit etwa +1,3 %
+   bei richtiger Richtung. Bei 10.000 $ je Position sind das etwa 130 $ je Treffer und rund 260 $ je
+   Fehlgriff. Gegen 139 $ für RTPR und 99 $ für Kurse im Monat ist das wenig, selbst wenn die KI gut trifft.
+
+**Erster Abend der ersten Fassung (19.11., 22:07 bis 1:45 Uhr deutscher Zeit).** 110 Pressemitteilungen
+kamen an, 39 wurden bewertet (alle mit vollem Text, 8 mit Erwartungen), typisch 1,6 Sekunden je Bewertung,
+zusammen 0,40 $. Ein Kandidat: Natural Grocers, Leerverkauf, weil Gewinn und Umsatz unter der Erwartung
+lagen. Die Meldung kam 80 Sekunden verspätet; der Geldkurs stand da bei 25,20 $ gegen 27,15 $ vor der
+Meldung, also 7 % tiefer. Das Limit von 26,53 $ griff nicht, die Order wurde nach 15 Sekunden gestrichen.
+Kein Trade, keine Fehler, Sitzungsende und Tagesabschluss sauber. Von sechs Bewertungen mit Richtung lagen
+nach 5 Minuten zwei richtig; fünf davon waren der KI selbst nicht sicher genug für einen Einstieg.
+Die kostenlose Kursquelle zeigte den ganzen Abend bei keiner von 25 Aktien mit Meldung einen brauchbaren
+Kurs. Die SEC-Liste lief ab 22:07 Uhr wieder.
+
 ## Bekannte Schwächen des Tests
 
 - **Papertrading füllt Orders zu günstig aus.** Echte Kursrutscher bei Nachrichten bildet
@@ -491,3 +557,6 @@ Ankunft bis zur Entscheidung 1,8 bis 2,9 Sekunden.
   von PR Newswire, Limit ab dem Kurs vor der Meldung, Stop und Ziel ab dem Ausführungskurs, Kurs der
   Position vom Broker. Werte im Abschnitt „Erste Fassung im Handel“. Die reguläre Handelszeit und der
   Modelltest bleiben unverändert.
+- 2026-11-20 (Auswertung, keine Änderung am Handel): Spanne vor und nach der Börse gemessen, siehe
+  „Dritte Auswertung“. Befund an Josh gemeldet mit dem Vorschlag, dort nur noch bei bekannter, enger
+  Spanne einzusteigen. Bis zu seiner Entscheidung läuft die erste Fassung wie freigegeben.

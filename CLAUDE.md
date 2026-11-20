@@ -92,6 +92,13 @@ Worten in `memory/strategy.md`, „Erste Fassung im Handel“. Jede Änderung da
   sie bewertet (am 19.11. mit `tools/price_probe.py` geprüft: er folgt dem echten Markt).
 - In der regulären Handelszeit gilt weiter die alte Regel mit Kursbestätigung (`bot/news_strategy.py`).
 
+**Befund vom 20.11. (noch ohne Entscheidung von Josh):** Vor und nach der Börse liegt die Spanne
+zwischen Geld- und Briefkurs direkt nach einer Meldung typisch bei 2 bis 4 %, die Bewegung in 5 Minuten
+bei 2,2 %. Mit den Regeln der ersten Fassung endet ein ausgeführter Trade dort meist sofort am Stop.
+Vorschlag an Josh: dort nur einsteigen, wenn der Bot vorher Geld- und Briefkurs kennt (Probe-Order über
+1 Aktie oder Datenpaket) und die Spanne höchstens 0,5 % beträgt; Sofort-Einstieg auch in der
+Handelszeit, wo die Spanne klein ist. Zahlen: `memory/strategy.md`, „Dritte Auswertung“.
+
 **Was noch fehlt**
 - Schnelle Quelle: RTPR (Pressemitteilungen in unter einer Sekunde, 139 $ im Monat nach sieben
   Probetagen). Josh hat den Start noch nicht entschieden; geplant wird mit dem 30.11. Ohne sie
