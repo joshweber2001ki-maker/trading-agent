@@ -536,7 +536,7 @@ Die SEC als zweite Quelle macht den Sofort-Einstieg bei Quartalszahlen also nich
 für Meldungen ohne Pressemitteilung. Die eine Ausnahme war Natural Grocers am 19.11.
 
 **Erster Abend der ersten Fassung (19.11., 22:07 bis 1:45 Uhr deutscher Zeit).** 110 Pressemitteilungen
-kamen an, 39 wurden bewertet (alle mit vollem Text, 8 mit Erwartungen), typisch 1,6 Sekunden je Bewertung,
+kamen an, 39 wurden bewertet (alle mit vollem Text, 9 mit Erwartungen), typisch 1,6 Sekunden je Bewertung,
 zusammen 0,40 $. Ein Kandidat: Natural Grocers, Leerverkauf, weil Gewinn und Umsatz unter der Erwartung
 lagen. Die Zahlen lagen seit 22:05:11 Uhr bei der SEC, die Pressemitteilung trägt 22:10:00 Uhr und kam
 um 22:11:20 Uhr beim Bot an. Da stand der Geldkurs schon bei 25,20 $ gegen 27,15 $ vorher, also 7 %
