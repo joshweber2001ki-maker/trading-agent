@@ -1,0 +1,2 @@
+{"t": "2026-11-21T05:00:05Z", "kind": "day_start", "day": "2026-11-21", "trading_day": false, "universe": 12678, "equity": 102072.98, "last_equity": 102072.98, "llm": true, "llm_model": "claude-opus-5-5", "llm_shadow": ["claude-haiku-5-5", "claude-sonnet-5-5"], "news": true, "orb": false, "extended": true, "fast": true}
+{"t": "2026-11-21T05:00:06Z", "kind": "expectations", "companies": 11, "with_eps": 8, "with_revenue": 8}
