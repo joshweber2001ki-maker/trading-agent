@@ -148,11 +148,16 @@ max_news_candidates      = 40    # höchstens so viele News-Kandidaten kommen in
 static_pool = ["NVDA", "TSLA", "AMD", "META", "AMZN", "AAPL", "MSFT", "PLTR", "COIN", "AVGO", "NFLX", "SMCI", "MU", "GOOGL", "INTC", "MSTR", "HOOD", "UBER", "BA", "JPM"]
 
 [wires]
-# Zweite, schnellere Nachrichtenquelle: Pressemitteilungen direkt vom Verteiler PR Newswire.
-# Alpacas eigener Nachrichtenstrom liefert Meldungen nur gebündelt etwa alle 30 Minuten.
-enabled   = true
-poll_s    = 60      # jeder Feed wird so oft abgefragt (der Anbieter erneuert ihn nur einmal pro Minute)
-max_age_s = 420     # so alt darf eine Pressemitteilung für einen Trade höchstens sein
+# Pressemitteilungen direkt von den Verteilern (PR Newswire, GlobeNewswire, Business Wire).
+# Jede Firma nutzt einen Verteiler; erst alle zusammen decken die meisten Berichte ab.
+# Kommt dieselbe Nachricht mehrfach (zweiter Verteiler, Alpacas Strom), zählt nur die erste.
+enabled     = true
+fast_poll_s = 10    # der Haupt-Feed jedes Verteilers (jeweils der erste in der Liste)
+poll_s      = 60    # die Themen-Feeds
+max_age_s   = 420   # so alt darf eine Pressemitteilung für einen Trade höchstens sein
+same_news_min = 15  # gleiche Aktie, ähnliche Überschrift oder beides Ergebnisse binnen 15 Minuten = dieselbe Nachricht
+trade = ["prnewswire", "globenewswire", "businesswire"]   # diese Verteiler werden bewertet und gehandelt; fehlt einer, wird er nur gemessen
+# PR Newswire
 feeds = [
   "https://www.prnewswire.com/rss/news-releases-list.rss",
   "https://www.prnewswire.com/rss/financial-services-latest-news/earnings-list.rss",
@@ -164,6 +169,19 @@ feeds = [
   "https://www.prnewswire.com/rss/health-latest-news/fda-approval-list.rss",
   "https://www.prnewswire.com/rss/health-latest-news/clinical-trials-medical-discoveries-list.rss",
   "https://www.prnewswire.com/rss/general-business-latest-news/personnel-announcements-list.rss",
+]
+
+[wires.more]
+globenewswire = [
+  "https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
+  "https://www.globenewswire.com/RssFeed/subjectcode/13-Earnings%20Releases%20and%20Operating%20Results/feedTitle/GlobeNewswire%20-%20Earnings%20Releases%20and%20Operating%20Results",
+]
+businesswire = [
+  "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeEF9YXA==",   # Ergebnisse
+  "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeEFtRWA==",   # Übernahmen
+  "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeEFtRWw==",   # Produkte und Dienste
+  "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeEFpQWg==",   # Technologie
+  "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNZWg==",   # FDA
 ]
 
 [edgar]

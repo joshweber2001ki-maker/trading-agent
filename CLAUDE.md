@@ -1,6 +1,6 @@
 # Trading-Bot (Alpaca Paper-Trading)
 
-Stand: 2026-11-20. Zweck: kurzfristigen Handel nach Unternehmensmeldungen mit großen
+Stand: 2026-11-22. Zweck: kurzfristigen Handel nach Unternehmensmeldungen mit großen
 Positionen im **Paper-Konto** testen. Die zweite Strategie (Ausbruch aus der Eröffnungsspanne)
 ist seit dem 17.11.2026 auf Joshs Entscheidung abgeschaltet (`[orb] enabled = false`); der
 Code bleibt im Repo. Echtgeld ist nicht vorgesehen; `bot/main.py` verweigert den Start,
@@ -19,7 +19,8 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/orb_strategy.py` | Ausbruch aus der Eröffnungsspanne (abgeschaltet seit 17.11.2026) |
 | `bot/executor.py` | Positionsgröße, Risikogrenzen, Order mit Stop und Ziel, Zeitlimit, Glattstellen. Vor und nach der Börse (`[extended]`): nur Limit-Orders; Stop und Zeitlimit überwacht der Bot selbst, am Kurs, mit dem der Broker die offene Position bewertet |
 | `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API. Ein Modell entscheidet (`[llm] model`), weitere bewerten zum Vergleich mit (`shadow`); jedes Modell braucht eine eigene Form der Anfrage |
-| `bot/wires.py` | zweite Nachrichtenquelle: Pressemitteilungen von PR Newswire, Firmenname → Börsenkürzel |
+| `bot/wires.py` | Pressemitteilungen von PR Newswire, GlobeNewswire und Business Wire (seit 22.11.), je Verteiler die Zuordnung zum Börsenkürzel; Haupt-Feeds alle 10 s, Themen-Feeds jede Minute (`[wires]`) |
+| `bot/first.py` | dieselbe Nachricht aus mehreren Quellen: nur die erste wird bewertet und gehandelt, jede spätere Kopie protokolliert (`news_dup`, mit Verspätung) |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
 | `bot/fast.py` | Sofort-Einstieg vor und nach der Börse (`[fast]`): Pressemitteilung → voller Text und Erwartungen → KI-Bewertung → Limit ab dem Kurs vor der Meldung → Einstieg |
 | `bot/finnhub.py` | Berichtstermine und Analystenerwartungen (Gewinn je Aktie, Umsatz, letzte Quartale) von Finnhub, kostenloses Konto; geht als Vorwissen in die Bewertung des Sofort-Einstiegs |
@@ -81,8 +82,9 @@ Worten in `memory/strategy.md`, „Erste Fassung im Handel“. Jede Änderung da
 
 **Was läuft**
 - Vor Börsenbeginn (10:00 bis 15:20 Uhr deutscher Zeit) und nach Börsenschluss (22:00 bis 1:45 Uhr):
-  `bot/fast.py`. Quelle ist bisher nur PR Newswire, das anderthalb bis dreieinhalb Minuten zu spät
-  kommt. Bewertet wird mit dem Modell aus `[llm]`, mit vollem Text der Meldung und, wenn die Firma
+  `bot/fast.py`. Quellen sind seit dem 22.11. PR Newswire (im Median zwei Minuten zu spät),
+  GlobeNewswire und Business Wire (Verspätung noch nicht gemessen); PR Newswire allein trug nur
+  16 von 99 Ergebnisberichten der Woche bis 20.11. Kommt dieselbe Nachricht mehrfach, zählt die erste. Bewertet wird mit dem Modell aus `[llm]`, mit vollem Text der Meldung und, wenn die Firma
   gerade berichtet, mit den Erwartungen von Finnhub.
 - Der Bot hat dort keinen Kurs in Echtzeit (die kostenlose Kursquelle zeigt fast nichts, Alpacas
   Datenpaket für 99 $ im Monat will Josh vorerst nicht). Deshalb: Das Limit geht vom letzten Kurs des
@@ -104,9 +106,9 @@ Der Vorschlag mit allen Werten: `reports/2026-11-20-vorschlag-zweite-fassung.md`
 nach Joshs Ja; bis dahin läuft die erste Fassung wie freigegeben.
 
 **Was noch fehlt**
-- Schnelle Quelle: RTPR (Pressemitteilungen in unter einer Sekunde, 139 $ im Monat nach sieben
-  Probetagen). Josh hat den Start noch nicht entschieden; geplant wird mit dem 30.11. Ohne sie
-  entstehen wenige Trades, weil der Kurs bei verspäteten Meldungen meist schon gelaufen ist.
+- Schnelle Quelle: RTPR (Pressemitteilungen in unter einer Sekunde). Josh ist sie zum Testen zu teuer
+  (21.11.: 99 € im Monat, keine Probewoche angezeigt). Stattdessen seit 22.11. mehrere kostenlose
+  Verteiler; die Wochenstatistik zeigt je Quelle die Verspätung („Nachrichtenquellen“).
 - SEC-Meldungen als zweite Quelle für den Sofort-Einstieg (Text der Anlage holen): nachrangig, denn bei
   Quartalszahlen ist die Pressemitteilung fast immer zuerst da (16 von 17 Fällen, im Median 205 Sekunden).
   Die SEC-Liste bekam am 19.11. ab 6:00 Uhr New Yorker Zeit keine Antwort mehr vom Dienst der SEC (nur
@@ -146,8 +148,9 @@ fest; bis dahin `[llm]` in `config.toml` nicht ändern. Einzelheiten: `memory/st
   je Gruppe `n` Aktien, davon `seeing` mit brauchbarem Kurs); vom Sofort-Einstieg jede Bewertung
   (`fast_rated`, auch ohne Trade; mit `news_speed` derselben Meldung zeigt sich, ob die Richtung
   stimmte), nicht bewertete Meldungen mit Grund (`fast_skipped`), Kandidaten ohne Einstieg mit Grund
-  (`fast_rejected`: `too_old`, `no_reference`, `max_open_strategy`, `entry_refused` …) und einmal je
-  Laden die Zahl der Firmen mit Erwartungen (`expectations`)
+  (`fast_rejected`: `too_old`, `no_reference`, `max_open_strategy`, `entry_refused` …), einmal je
+  Laden die Zahl der Firmen mit Erwartungen (`expectations`) und jede spätere Kopie einer schon
+  gemeldeten Nachricht (`news_dup`: Quelle, erste Quelle, `lag_s` = wie viel später)
 - `logs/daily/JJJJ-MM-TT.json` – Tagesabschluss. Das Ergebnis misst gegen den Depotwert zum
   Börsenschluss des Vortags (`basis: last_close`), ein Neustart am Tag ändert daran nichts. Der
   Abschluss vom 17.11.2026 stammt noch von der alten Version und zählt erst ab dem Neustart um

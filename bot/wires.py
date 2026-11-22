@@ -1,9 +1,16 @@
-"""Press releases straight from the wire (PR Newswire RSS) as a faster news source.
+"""Press releases straight from the wires (PR Newswire, GlobeNewswire, Business Wire) as news sources.
 
-Alpaca's own news stream delivers summaries in half-hourly batches; a press release is on
-the wire's RSS feed within a few minutes. The feed carries the company name but no ticker,
-so the name is matched against the names of tradable US stocks. Only exact matches after
-normalisation count: a missed release costs nothing, a wrong ticker would cost a trade.
+Alpaca's own news stream delivers summaries late; a press release is on the wire's RSS feed within a
+few minutes. Companies use one wire or another, so each wire alone misses most announcements: in the
+week of 17.11.2026 only 16 of 99 results reports came over PR Newswire.
+
+Which stock a release belongs to:
+- PR Newswire names the company but gives no ticker: the name is matched against the names of
+  tradable US stocks; only exact matches after normalisation count.
+- GlobeNewswire gives the listing in a category ("Nasdaq:ACME").
+- Business Wire gives neither: the ticker is taken from the opening line, where the company names
+  itself ("NEW YORK--(BUSINESS WIRE)--Acme Corp (NYSE: ACME) today ...").
+A missed release costs nothing, a wrong ticker would cost a trade, so anything unclear is dropped.
 """
 import asyncio
 import html
@@ -17,6 +24,7 @@ from .common import iso, log, spawn
 from .market import FUND_RE
 
 NS = {"dc": "http://purl.org/dc/elements/1.1/"}
+US_LISTING = re.compile(r"^(NASDAQ|NYSE|NYSE AMERICAN|NYSE MKT|NYSE ARCA|AMEX|CBOE)\s*:\s*([A-Z]{1,5})$", re.I)
 UA = "Mozilla/5.0 (compatible; trading-bot-feed-reader/1.0)"
 
 # Listings that are not the ordinary share of a company.
@@ -33,6 +41,9 @@ SUFFIXES = {
     "llc", "lp", "sa", "nv", "ag", "se", "ab", "asa", "holdings", "holding", "group", "the", "and", "new",
 }
 TICKER = re.compile(r"\((?:NASDAQ|Nasdaq|NYSE|NYSE American|NYSE Arca|AMEX|NYSEAMERICAN)\s*:\s*([A-Z]{1,5})\)")
+# Business Wire's opening line: "CITY--(BUSINESS WIRE)--Name (NYSE: ACME) ..." The ticker counts only there.
+BW_OPENING = re.compile(r"\(BUSINESS WIRE\)\s*--\s*([^()]{1,90}?)\s*(?:\([^()]{0,60}\)\s*)?\((?:NASDAQ|Nasdaq|NYSE|NYSE American|NYSE Arca|AMEX)\s*:\s*([A-Z]{1,5})\)")
+BW_NOT_A_NAME = re.compile(r"\b(today|announc\w*|said|says|with|partner\w*|signed|agreement|deal)\b", re.I)
 
 
 def normalize(name: str) -> str:
@@ -70,17 +81,30 @@ class NameIndex:
 def release_text(page: str, limit: int = 12000) -> str:
     """The running text of a press release from its web page: the paragraphs of the release body,
     without tables, scripts and navigation. Empty if the page has no recognisable body."""
-    m = re.search(r'<section[^>]*class="[^"]*release-body[^"]*"[^>]*>(.*?)</section>', page, re.S | re.I)
+    m = re.search(r'<section[^>]*class="[^"]*release-body[^"]*"[^>]*>(.*?)</section>', page, re.S | re.I)  # PR Newswire
+    if m:
+        return body_text(m.group(1), limit)
+    # Business Wire and GlobeNewswire: from the start of the release body to the contact block or the end of the article
+    m = re.search(r'<div[^>]*(?:class="[^"]*bw-release-story[^"]*"|itemprop="articleBody")[^>]*>', page, re.I)
     if not m:
         return ""
-    body = re.sub(r"<(script|style|table)\b.*?</\1>", " ", m.group(1), flags=re.S | re.I)
+    rest = page[m.end():m.end() + 60000]
+    stop = re.search(r'class="[^"]*(?:bw-release-contact|bw-release-footer|article-contact|main-tags)|</article>', rest, re.I)
+    return body_text(rest[:stop.start()] if stop else rest, limit)
+
+
+def body_text(fragment: str, limit: int = 12000) -> str:
+    """The paragraphs of an HTML fragment as plain running text, without tables and scripts."""
+    body = re.sub(r"<(script|style|table)\b.*?</\1>", " ", fragment or "", flags=re.S | re.I)
     paras = [re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", x))).strip()
              for x in re.findall(r"<p\b[^>]*>(.*?)</p>", body, re.S | re.I)]
     return " ".join(x for x in paras if x)[:limit]
 
 
 def parse_feed(xml_text: str):
-    """RSS items as dicts: guid, link, title, summary, company, language, published (datetime)."""
+    """RSS items as dicts: guid, link, title, summary, company, language, published (datetime),
+    listings (US tickers the wire itself names, GlobeNewswire only) and body (the full text, when the
+    feed carries it, GlobeNewswire only)."""
     out = []
     root = ET.fromstring(xml_text)
     for it in root.findall("./channel/item"):
@@ -88,14 +112,28 @@ def parse_feed(xml_text: str):
             published = parsedate_to_datetime(it.findtext("pubDate"))
         except (TypeError, ValueError):
             continue
+        if published.tzinfo is None:
+            continue
+        desc = it.findtext("description") or ""
+        listings, named = [], 0
+        for c in it.findall("category"):
+            if (c.get("domain") or "").endswith("/rss/stock"):
+                named += 1
+                m = US_LISTING.match((c.text or "").strip())
+                if m:
+                    listings.append(m.group(2).upper())
+        plain = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", desc))).strip()
         out.append({
             "guid": it.findtext("guid") or it.findtext("link") or "",
             "link": (it.findtext("link") or "").strip(),
-            "title": (it.findtext("title") or "").strip(),
-            "summary": re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", it.findtext("description") or "")).strip(),
+            "title": html.unescape(it.findtext("title") or "").strip(),
+            "summary": plain[:1500],
+            "body": body_text(desc) if "<p" in desc.lower() and len(plain) > 1500 else "",
             "company": (it.findtext("dc:contributor", namespaces=NS) or "").strip(),
             "language": (it.findtext("dc:language", namespaces=NS) or "en").lower(),
             "published": published,
+            "listings": listings,
+            "listed_elsewhere": bool(named) and not listings,
         })
     return out
 
@@ -104,19 +142,37 @@ def to_article(item: dict, index: NameIndex, universe: dict, source: str, max_ag
     """Turn a feed item into the article shape the news strategy expects, or None."""
     if not item["language"].startswith("en") or not item["title"]:
         return None
-    sym = index.lookup(item["company"])
+    sym = None
+    listed = sorted({t for t in item.get("listings") or [] if t in universe})
+    if listed:
+        if len(listed) > 1:
+            return None                              # one release, several companies: unclear
+        sym = listed[0]
+    elif item.get("listings") or item.get("listed_elsewhere"):
+        return None                                  # the wire names a listing, but not a tradable US one
+    if not sym and source == "businesswire":
+        m = BW_OPENING.search(item["summary"])
+        if m and m.group(2) in universe and not BW_NOT_A_NAME.search(m.group(1)):
+            sym = m.group(2)
+        if not sym:
+            return None
     if not sym:
-        for t in TICKER.findall(item["title"] + " " + item["summary"]):
+        sym = index.lookup(item["company"])
+    if not sym:
+        for t in TICKER.findall(item["title"] + " " + item["summary"][:400]):
             if t in universe:
                 sym = t
                 break
     if not sym:
         return None
-    return {
-        "id": f"{source}:{item['guid'][-60:]}", "headline": item["title"], "summary": item["summary"],
+    art = {
+        "id": f"{source}:{item['guid'][-60:]}", "headline": item["title"], "summary": item["summary"][:600],
         "created_at": iso(item["published"]), "symbols": [sym], "source": source,
         "company": item["company"], "max_age_s": max_age_s, "url": item.get("link") or "",
     }
+    if item.get("body"):
+        art["text"] = item["body"]
+    return art
 
 
 class Wires:
@@ -128,33 +184,51 @@ class Wires:
         self.index = None
         self.index_size = 0
         self.stats = {"polls": 0, "items": 0, "matched": 0, "errors": 0}
+        self.by_source = {}    # source -> the same counts, per wire
+
+    def feeds(self):
+        """(source, url, every_s) for every feed. The first feed of each wire is its main feed and is
+        asked more often; the others are topic feeds that catch what the main feed's short list misses."""
+        cfg, out = self.cfg, []
+        wires = {"prnewswire": cfg.get("feeds") or [], **(cfg.get("more") or {})}
+        for source, urls in wires.items():
+            for i, url in enumerate(urls):
+                out.append((source, url, cfg.get("fast_poll_s", cfg["poll_s"]) if i == 0 else cfg["poll_s"]))
+        return out
+
+    def _count(self, source, key):
+        self.stats[key] += 1
+        s = self.by_source.setdefault(source, {"polls": 0, "items": 0, "matched": 0, "errors": 0})
+        s[key] += 1
 
     def reset_day(self):
         self.stats = {k: 0 for k in self.stats}
+        self.by_source = {}
         self.index = None      # rebuilt from the day's fresh universe on the next poll
         if len(self.seen) > 20000:
             self.seen.clear()
 
-    async def poll(self, url: str):
+    async def poll(self, url: str, source: str = "prnewswire"):
         if self.index is None or self.index_size != len(self.universe.cache):
             self.index = NameIndex(self.universe.cache)
             self.index_size = len(self.universe.cache)
         hdr = {"If-Modified-Since": self.modified[url]} if url in self.modified else {}
         r = await self.http.get(url, headers=hdr)
-        self.stats["polls"] += 1
+        self._count(source, "polls")
         if r.status_code == 304:
             return
         r.raise_for_status()
         if r.headers.get("last-modified"):
             self.modified[url] = r.headers["last-modified"]
         for item in parse_feed(r.text):
-            if item["guid"] in self.seen:
+            key = (source, item["guid"])
+            if key in self.seen:
                 continue
-            self.seen.add(item["guid"])
-            self.stats["items"] += 1
-            art = to_article(item, self.index, self.universe.cache, "prnewswire", self.cfg["max_age_s"])
+            self.seen.add(key)
+            self._count(source, "items")
+            art = to_article(item, self.index, self.universe.cache, source, self.cfg["max_age_s"])
             if art:
-                self.stats["matched"] += 1
+                self._count(source, "matched")
                 # Every matched release with its publication time, at any hour and whether or not
                 # it is rated: the list cannot be rebuilt later (the feed only holds the newest
                 # items), and it is what a study of how fast prices react needs.
@@ -164,8 +238,10 @@ class Wires:
 
     async def fetch_text(self, url: str, timeout_s: float = 4.0) -> str:
         """The full text of a release from the wire's own page; empty if that fails or takes too long."""
-        if not url.startswith("https://www.prnewswire.com/"):
+        if not url.startswith(("https://www.prnewswire.com/", "https://www.businesswire.com/",
+                               "http://www.businesswire.com/", "https://www.globenewswire.com/")):
             return ""
+        url = url.replace("http://www.businesswire.com/", "https://www.businesswire.com/")
         try:
             r = await asyncio.wait_for(self.http.get(url), timeout=timeout_s)
             return release_text(r.text) if r.status_code == 200 else ""
@@ -173,19 +249,23 @@ class Wires:
             return ""
 
     async def run(self):
-        """Poll all feeds round-robin, one request every poll_s / len(feeds) seconds."""
-        feeds = self.cfg["feeds"]
+        """Poll every feed on its own clock: main feeds every fast_poll_s, topic feeds every poll_s.
+        The starts are spread out so the requests do not come in bursts."""
+        feeds = self.feeds()
         if not self.cfg["enabled"] or not feeds:
             return
-        gap = max(2.0, self.cfg["poll_s"] / len(feeds))
-        log.info("wires: polling %d feeds, one request every %.0f s", len(feeds), gap)
+        log.info("wires: polling %d feeds of %d wires", len(feeds), len({f[0] for f in feeds}))
+        await asyncio.gather(*(self._loop(src, url, every, i * 1.3) for i, (src, url, every) in enumerate(feeds)))
+
+    async def _loop(self, source, url, every_s, delay_s):
+        await asyncio.sleep(delay_s)
         while True:
-            for url in feeds:
-                try:
-                    if self.universe.cache:
-                        await self.poll(url)
-                except Exception as e:
-                    self.stats["errors"] += 1
-                    if self.stats["errors"] <= 20 or self.stats["errors"] % 100 == 0:
-                        self.journal.event("error", where="wires", feed=url[-60:], error=repr(e)[:200])
-                await asyncio.sleep(gap)
+            try:
+                if self.universe.cache:
+                    await self.poll(url, source)
+            except Exception as e:
+                self._count(source, "errors")
+                n = self.by_source[source]["errors"]
+                if n <= 20 or n % 100 == 0:
+                    self.journal.event("error", where="wires", source=source, feed=url[-60:], error=repr(e)[:200])
+            await asyncio.sleep(max(2.0, every_s))

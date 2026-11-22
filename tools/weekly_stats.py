@@ -355,6 +355,28 @@ def fast_stats(rated, speed, skipped, rejected, limits):
     }
 
 
+def source_stats(wire_items, dups):
+    """Per news source: how many releases it delivered, how late (seen by the bot minus the time stamp
+    of the release; the wires stamp to the minute or second), and how often it was first or a copy."""
+    by = {}
+    for e in wire_items:
+        try:
+            lag = (datetime.fromisoformat(e["t"].replace("Z", "+00:00"))
+                   - datetime.fromisoformat(e["published"].replace("Z", "+00:00"))).total_seconds()
+        except (KeyError, ValueError, AttributeError):
+            continue
+        by.setdefault(e.get("source") or "?", []).append(lag)
+    out = {}
+    for src, lags in sorted(by.items()):
+        live = sorted(x for x in lags if 0 <= x <= 900)
+        q = lambda f: round(live[min(len(live) - 1, int(len(live) * f))]) if live else None
+        out[src] = {"n": len(lags), "lag_median_s": q(0.5), "lag_q25_s": q(0.25), "lag_q75_s": q(0.75),
+                    "first_of_dups": sum(1 for d in dups if d.get("first_source") == src),
+                    "copies": sum(1 for d in dups if d.get("source") == src)}
+    pairs = Counter((d.get("first_source"), d.get("source")) for d in dups)
+    return {"by_source": out, "dup_pairs": {f"{a} vor {b}": n for (a, b), n in pairs.most_common(10)}}
+
+
 def build(root: Path, start: date, end: date):
     days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
     trades = apply_corrections(
@@ -445,6 +467,8 @@ def build(root: Path, start: date, end: date):
                           for src in sorted({o.get("source") or "?" for o in outcomes})},
         },
         "models": model_stats(classified, shadows, fallbacks, outcomes, news_limits(root)),
+        "sources": source_stats([e for e in events if e["kind"] == "wire_item"],
+                                [e for e in events if e["kind"] == "news_dup"]),
         "fast": {
             **fast_stats([e for e in events if e["kind"] == "fast_rated"], speed,
                          [e for e in events if e["kind"] == "fast_skipped"],
@@ -544,6 +568,17 @@ def markdown(r):
                            + " | ".join(f"{m}: {v}" for m, v in x["verdicts"].items()))
         out += [f"- Trades nach Entscheidung von {k}: {fmt(v)}" for k, v in r["news_by_model"].items()]
 
+    so = r["sources"]
+    if so["by_source"]:
+        out += ["", "## Nachrichtenquellen (Pressemitteilungen)",
+                "(Verspätung = beim Bot angekommen minus Zeitstempel der Meldung, Median und mittlere Hälfte; "
+                "„zuerst“ / „Kopie“ = dieselbe Nachricht kam auch über eine andere Quelle)",
+                "| Quelle | Meldungen | Verspätung | zuerst | Kopie |", "|---|---|---|---|---|"]
+        for src, v in so["by_source"].items():
+            lag = f'{v["lag_median_s"]} s ({v["lag_q25_s"]}–{v["lag_q75_s"]})' if v["lag_median_s"] is not None else "?"
+            out.append(f'| {src} | {v["n"]} | {lag} | {v["first_of_dups"]} | {v["copies"]} |')
+        if so["dup_pairs"]:
+            out.append(f'- doppelt gemeldet: {so["dup_pairs"]}')
     fa = r["fast"]
     if fa["rated"]:
         lim = fa["limits"]

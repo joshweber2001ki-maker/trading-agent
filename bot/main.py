@@ -20,6 +20,7 @@ from .market import Session, StockStats, Universe
 from .news_strategy import OUTCOME_DELAY_MIN, NewsStrategy
 from .orb_strategy import OrbStrategy
 from .speed import Speed
+from .first import FirstReport
 from .wires import Wires
 
 NEWS_WS = "wss://stream.data.alpaca.markets/v1beta1/news"
@@ -68,6 +69,8 @@ class Bot:
             stats=StockStats(self.api), shadows=self.shadows, fallback=self.cfg["llm"].get("fallback"),
         )
         self.wires = Wires(self.cfg["wires"], self.universe, self.on_wire, self.journal)
+        # Several sources report the same news: only the first report is rated and traded.
+        self.first = FirstReport(self.journal, self.cfg["wires"].get("same_news_min", 15))
         # Immediate entry before the open and after the close, with what analysts expect of today's results.
         self.expectations = Expectations(Finnhub(env("FINNHUB_API_KEY", "")), self.journal)
         self.fast = FastStrategy(
@@ -100,6 +103,11 @@ class Bot:
     async def on_wire(self, art: dict):
         """A press release from the wire: the fast strategy takes it before the open and after the
         close, the old one during the regular session. Each decides by itself whether it is its turn."""
+        if not self.first.claim(art):
+            return
+        trade = self.cfg["wires"].get("trade")
+        if trade is not None and art.get("source") not in trade:
+            return                      # this wire is only measured (wire_item), not rated or traded
         spawn(self.fast.on_article(art))
         await self.news.on_article(art)
 
@@ -116,7 +124,8 @@ class Bot:
                     async for raw in ws:
                         for m in json.loads(raw):
                             if m.get("T") == "n":
-                                spawn(self.news.on_article(m))
+                                if self.first.claim({**m, "source": m.get("source") or "alpaca"}):
+                                    spawn(self.news.on_article(m))
                             elif m.get("T") == "subscription":
                                 log.info("news stream connected")
                                 backoff, self.ws_connected = 2, True
@@ -191,7 +200,7 @@ class Bot:
             "market_open": s.is_open(), "news_stream": self.ws_connected,
             "llm_available": self.llm.available, "llm_model": self.llm.model, "llm_calls_today": self.llm.day_calls,
             "llm_shadow_calls": {c.model: c.day_calls for c in self.shadows},
-            "news": self.news.stats, "wires": self.wires.stats, "edgar": self.edgar.stats,
+            "news": self.news.stats, "wires": self.wires.stats, "wire_sources": self.wires.by_source, "edgar": self.edgar.stats,
             "fast": self.fast.stats, "fast_enabled": bool(self.cfg["fast"]["enabled"]),
             "expectations": len(self.expectations.rows),
             "orb_stage": self.orb.stage, "orb_pool": len(self.orb.pool), "orb_watching": sorted(self.orb.ranges),

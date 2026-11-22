@@ -286,6 +286,129 @@ def test_every_matched_release_is_logged_with_its_publication_time(tmp_path):
     assert [(r["symbol"], r["published"]) for r in items][0] == ("HD", "2026-11-17T10:43:00Z") and len(items) == 2
 
 
+GNW = """<?xml version="1.0"?><rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel>
+<item><guid isPermaLink="true">https://www.globenewswire.com/news-release/2026/11/23/3408001/0/en/acme.html</guid>
+<link>https://www.globenewswire.com/news-release/2026/11/23/3408001/0/en/acme.html</link>
+<category domain="https://www.globenewswire.com/rss/stock">Nasdaq:ACME</category>
+<category domain="https://www.globenewswire.com/rss/ISIN">US0000000001</category>
+<title>Acme Reports Third Quarter 2026 Results &amp; Raises Outlook</title>
+<description><![CDATA[<p>BOSTON, Nov. 23, 2026 (GLOBE NEWSWIRE) -- Acme Corp (Nasdaq: ACME) today reported revenue of
+$5.2&nbsp;billion. """ + "Long body. " * 200 + """</p><table><tr><td>1,234</td></tr></table><p>Outlook raised.</p>]]></description>
+<pubDate>Mon, 23 Nov 2026 12:01 GMT</pubDate><dc:language>en</dc:language><dc:contributor>Acme Corp</dc:contributor></item>
+<item><guid>https://www.globenewswire.com/news-release/2026/11/23/3408002/0/en/hk.html</guid>
+<category domain="https://www.globenewswire.com/rss/stock">HKSE:9973.HK</category>
+<title>Chery launches a car</title><description>x</description>
+<pubDate>Mon, 23 Nov 2026 12:00 GMT</pubDate><dc:language>en</dc:language><dc:contributor>Acme Corp</dc:contributor></item>
+<item><guid>https://www.globenewswire.com/news-release/2026/11/23/3408003/0/en/two.html</guid>
+<category domain="https://www.globenewswire.com/rss/stock">Nasdaq:ACME</category>
+<category domain="https://www.globenewswire.com/rss/stock">NYSE:BETA</category>
+<title>Acme and Beta merge</title><description>x</description>
+<pubDate>Mon, 23 Nov 2026 11:59 GMT</pubDate><dc:language>en</dc:language></item>
+</channel></rss>"""
+
+BW = """<?xml version="1.0"?><rss version="2.0"><channel>
+<item><title>Beta Inc. Reports Third Quarter Results</title>
+<link>http://www.businesswire.com/news/home/20261123000001/en/Beta-Reports/?feedref=x</link>
+<guid>20261123000001en</guid><pubDate>Mon, 23 Nov 2026 21:05:00 UT</pubDate>
+<description>NEW YORK--(BUSINESS WIRE)--Beta Inc. (NYSE: BETA) today announced results; its partner Acme (Nasdaq: ACME) ...</description></item>
+<item><title>Gamma partners with Acme</title>
+<link>http://www.businesswire.com/news/home/20261123000002/en/</link>
+<guid>20261123000002en</guid><pubDate>Mon, 23 Nov 2026 21:04:00 UT</pubDate>
+<description>AUSTIN, Texas--(BUSINESS WIRE)--Gamma, a private company, today announced a deal with Acme Corp (Nasdaq: ACME).</description></item>
+</channel></rss>"""
+
+
+def test_globenewswire_and_business_wire_name_their_stocks_differently():
+    assets = {"ACME": {"name": "Acme Corp"}, "BETA": {"name": "Beta Inc."}}
+    idx = NameIndex(assets)
+    g = parse_feed(GNW)
+    assert g[0]["listings"] == ["ACME"] and g[1]["listings"] == [] and g[2]["listings"] == ["ACME", "BETA"]
+    arts = [to_article(i, idx, assets, "globenewswire", 420) for i in g]
+    a = arts[0]
+    assert a["symbols"] == ["ACME"] and a["headline"] == "Acme Reports Third Quarter 2026 Results & Raises Outlook"
+    assert a["created_at"] == "2026-11-23T12:01:00Z" and a["text"].endswith("Outlook raised.") and "1,234" not in a["text"]
+    assert len(a["summary"]) <= 600
+    # a Hong Kong listing is not ours, even though the contributor's name matches a US stock; two companies: unclear
+    assert arts[1] is None and arts[2] is None
+    b = [to_article(i, idx, assets, "businesswire", 420) for i in parse_feed(BW)]
+    assert b[0]["symbols"] == ["BETA"] and b[0]["created_at"] == "2026-11-23T21:05:00Z" and "text" not in b[0]
+    assert b[1] is None                      # the ticker is the partner's, not the company's that speaks
+    from bot.wires import BW_OPENING, BW_NOT_A_NAME
+    m = BW_OPENING.search('SEATTLE--(BUSINESS WIRE)--Zeta Holdings, Inc. ("Zeta" or the "Company") (NYSE: ZETA), the leader')
+    assert m.group(2) == "ZETA" and not BW_NOT_A_NAME.search(m.group(1))
+
+
+def test_full_text_from_business_wire_and_globenewswire_pages():
+    from bot.wires import release_text
+    bw = """<html><nav><p>Menu</p></nav><div class="bw-release-story"><p>NEW YORK--(BUSINESS WIRE)--Beta Inc.
+      (NYSE: BETA) today reported results.</p><div><p>Revenue rose 9%.</p></div></div>
+      <div class="bw-release-contact"><p>Contact: press@beta</p></div></html>"""
+    assert release_text(bw) == "NEW YORK--(BUSINESS WIRE)--Beta Inc. (NYSE: BETA) today reported results. Revenue rose 9%."
+    gnw = """<div itemprop="articleBody"><p>Acme today reported.</p><p>Outlook raised.</p></div></article><p>Footer</p>"""
+    assert release_text(gnw) == "Acme today reported. Outlook raised."
+
+
+def test_every_wire_has_its_own_clock(tmp_path):
+    from bot.wires import Wires
+    cfg = {**CFG["wires"], "feeds": ["p1", "p2"], "more": {"globenewswire": ["g1"], "businesswire": ["b1", "b2"]},
+           "fast_poll_s": 10, "poll_s": 60}
+    w = Wires(cfg, None, None, Journal(tmp_path))
+    assert w.feeds() == [("prnewswire", "p1", 10), ("prnewswire", "p2", 60), ("globenewswire", "g1", 10),
+                         ("businesswire", "b1", 10), ("businesswire", "b2", 60)]
+
+
+def test_only_the_first_report_of_a_piece_of_news_counts(tmp_path, monkeypatch):
+    from bot import first as first_mod
+    from bot.first import FirstReport
+    clock = [datetime(2026, 11, 23, 21, 6, tzinfo=timezone.utc)]
+    monkeypatch.setattr(first_mod, "now", lambda: clock[0])
+    f = FirstReport(Journal(tmp_path), window_min=15)
+    art = lambda i, src, sym, head, pub="2026-11-23T21:05:00Z", syms=None: {
+        "id": i, "source": src, "symbols": syms or [sym], "headline": head, "created_at": pub}
+    assert f.claim(art("bw:1", "businesswire", "BETA", "Beta Inc. Reports Third Quarter Results"))
+    clock[0] += timedelta(seconds=40)
+    assert not f.claim(art("bw:1", "businesswire", "BETA", "Beta Inc. Reports Third Quarter Results"))   # same item again
+    assert not f.claim(art("gnw:9", "globenewswire", "BETA", "Beta Inc. Reports Third-Quarter Results", "2026-11-23T21:06:00Z"))
+    clock[0] += timedelta(minutes=5)
+    assert not f.claim(art(77, "benzinga", "BETA", "Beta Q3 EPS $1.20 Beats $1.10 Estimate"))         # both report results
+    assert f.claim(art(78, "benzinga", "BETA", "Beta Names New Chief Financial Officer"))             # other news
+    assert f.claim(art("prn:5", "prnewswire", "ACME", "Acme Reports Third Quarter Results"))          # other stock
+    clock[0] += timedelta(minutes=16)
+    assert f.claim(art("prn:6", "prnewswire", "BETA", "Beta Inc. Reports Third Quarter Results Conference Call Replay"))
+    # a roundup of many stocks blocks nobody's own release
+    assert f.claim(art(90, "benzinga", "X", "Earnings roundup: results from five companies", syms=["C1", "C2", "C3"]))
+    assert f.claim(art("gnw:10", "globenewswire", "C1", "C1 Reports Fourth Quarter Results"))
+    rows = [json.loads(l) for p in (tmp_path / "logs").glob("events-*.jsonl") for l in p.read_text().splitlines()]
+    dups = [r for r in rows if r["kind"] == "news_dup"]
+    assert [(d["source"], d["first_source"], d["lag_s"]) for d in dups] == [("globenewswire", "businesswire", 40.0),
+                                                                          ("benzinga", "businesswire", 340.0)]
+    assert dups[0]["published_lag_s"] == 60
+
+
+def test_a_copy_from_another_wire_is_neither_rated_nor_traded(tmp_path):
+    from bot.main import Bot
+    got = []
+
+    class Strat:
+        async def on_article(self, art): got.append(art["id"])
+
+    b = Bot.__new__(Bot)
+    from bot.first import FirstReport
+    b.first, b.fast, b.news = FirstReport(Journal(tmp_path)), Strat(), Strat()
+    b.cfg = {"wires": {"trade": ["businesswire", "prnewswire"]}}
+
+    async def run():
+        await b.on_wire({"id": "bw:1", "source": "businesswire", "symbols": ["BETA"], "headline": "Beta Reports Q3 Results",
+                         "created_at": "2026-11-23T21:05:00Z"})
+        await b.on_wire({"id": "prn:1", "source": "prnewswire", "symbols": ["BETA"], "headline": "Beta Reports Q3 Results",
+                         "created_at": "2026-11-23T21:05:00Z"})
+        await b.on_wire({"id": "gnw:1", "source": "globenewswire", "symbols": ["ACME"], "headline": "Acme Reports Q3 Results",
+                         "created_at": "2026-11-23T21:05:00Z"})          # a wire that is only measured
+        await asyncio.sleep(0)
+    asyncio.run(run())
+    assert got == ["bw:1", "bw:1"]                 # the fast and the old strategy each saw the first report once
+
+
 # ── simulated broker ─────────────────────────────────────────────────────────
 class FakeSession:
     def __init__(self):

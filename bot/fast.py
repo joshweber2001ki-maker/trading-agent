@@ -93,7 +93,7 @@ class FastStrategy:
             return skip("too_small", dollar_volume=st["dollar_volume"])
 
         article = dict(art)
-        if cfg.get("fetch_text") and self.fetch_text and art.get("url"):
+        if cfg.get("fetch_text") and self.fetch_text and art.get("url") and not art.get("text"):
             text = await self.fetch_text(art["url"])
             if text:
                 article["text"] = text

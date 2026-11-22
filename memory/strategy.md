@@ -619,3 +619,11 @@ Kurs. Die SEC-Liste lief ab 22:07 Uhr wieder.
   „Dritte Auswertung“. Die Regeln der ersten Fassung am gemessenen Verlauf durchgespielt: Sie verliert
   dort auch bei richtiger Richtung. Befund an Josh gemeldet mit dem Vorschlag, dort nur noch bei
   bekannter, enger Spanne einzusteigen. Bis zu seiner Entscheidung läuft die erste Fassung wie freigegeben.
+- 2026-11-22 (Joshs Wunsch vom 21. und 22.11.): mehrere Nachrichtenquellen statt RTPR. Zu PR Newswire
+  kommen GlobeNewswire (Kürzel steht im Feed, voller Text im Feed) und Business Wire (Kürzel nur aus der
+  Eröffnungszeile, in der sich die Firma selbst nennt). Haupt-Feed jedes Verteilers alle 10 Sekunden
+  (vorher jeder Feed einmal je Minute), Themen-Feeds jede Minute. Dieselbe Nachricht (gleiche Aktie binnen
+  15 Minuten, ähnliche Überschrift oder beides Ergebnisse) wird nur beim ersten Eintreffen bewertet und
+  gehandelt, auch gegenüber Alpacas Strom; Kopien als `news_dup`. Grund: Von 99 Ergebnisberichten vom
+  17. bis 20.11. kamen nur 16 über PR Newswire. Alle drei Verteiler handeln (`[wires] trade`); Regeln
+  des Handels sonst unverändert (erste Fassung).
