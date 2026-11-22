@@ -184,6 +184,16 @@ businesswire = [
   "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeGFNZWg==",   # FDA
 ]
 
+[finnhub_news]
+# Nachrichten von Finnhub (kostenloses Konto): allgemeine Marktnachrichten und die Nachrichten der Firmen,
+# die heute berichten. Finnhub sammelt bei anderen Seiten ein; nur messen, nicht handeln (steht nicht in
+# [wires] trade). Ob es je schneller ist als die Verteiler, zeigt news_dup.
+enabled        = true
+categories     = ["general", "merger"]
+market_every_s = 20      # die Marktnachrichten so oft
+company_every_s = 120    # jede berichtende Firma so oft
+max_companies  = 40
+
 [edgar]
 # Pflichtmitteilungen an die US-Börsenaufsicht SEC (Formular 8-K): nur mitschreiben, nicht handeln.
 # Läuft nur, wenn auf dem Server eine Kontaktadresse hinterlegt ist (/etc/trading-bot/sec.env,

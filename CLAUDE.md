@@ -20,6 +20,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/executor.py` | Positionsgröße, Risikogrenzen, Order mit Stop und Ziel, Zeitlimit, Glattstellen. Vor und nach der Börse (`[extended]`): nur Limit-Orders; Stop und Zeitlimit überwacht der Bot selbst, am Kurs, mit dem der Broker die offene Position bewertet |
 | `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API. Ein Modell entscheidet (`[llm] model`), weitere bewerten zum Vergleich mit (`shadow`); jedes Modell braucht eine eigene Form der Anfrage |
 | `bot/wires.py` | Pressemitteilungen von PR Newswire, GlobeNewswire und Business Wire (seit 22.11.), je Verteiler die Zuordnung zum Börsenkürzel; Haupt-Feeds alle 10 s, Themen-Feeds jede Minute (`[wires]`) |
+| `bot/finnhub_news.py` | Nachrichten von Finnhub (kostenloses Konto): Marktnachrichten und die Nachrichten der Firmen, die heute berichten; nur gemessen, nicht gehandelt (`[finnhub_news]`) |
 | `bot/first.py` | dieselbe Nachricht aus mehreren Quellen: nur die erste wird bewertet und gehandelt, jede spätere Kopie protokolliert (`news_dup`, mit Verspätung) |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
 | `bot/fast.py` | Sofort-Einstieg vor und nach der Börse (`[fast]`): Pressemitteilung → voller Text und Erwartungen → KI-Bewertung → Limit ab dem Kurs vor der Meldung → Einstieg |
@@ -150,7 +151,8 @@ fest; bis dahin `[llm]` in `config.toml` nicht ändern. Einzelheiten: `memory/st
   stimmte), nicht bewertete Meldungen mit Grund (`fast_skipped`), Kandidaten ohne Einstieg mit Grund
   (`fast_rejected`: `too_old`, `no_reference`, `max_open_strategy`, `entry_refused` …), einmal je
   Laden die Zahl der Firmen mit Erwartungen (`expectations`) und jede spätere Kopie einer schon
-  gemeldeten Nachricht (`news_dup`: Quelle, erste Quelle, `lag_s` = wie viel später)
+  gemeldeten Nachricht (`news_dup`: Quelle, erste Quelle, `lag_s` = wie viel später; `blocked: false`
+  heißt, die erste Quelle wird nur gemessen, die spätere wurde trotzdem gehandelt)
 - `logs/daily/JJJJ-MM-TT.json` – Tagesabschluss. Das Ergebnis misst gegen den Depotwert zum
   Börsenschluss des Vortags (`basis: last_close`), ein Neustart am Tag ändert daran nichts. Der
   Abschluss vom 17.11.2026 stammt noch von der alten Version und zählt erst ab dem Neustart um

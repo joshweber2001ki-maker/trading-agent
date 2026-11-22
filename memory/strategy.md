@@ -627,3 +627,9 @@ Kurs. Die SEC-Liste lief ab 22:07 Uhr wieder.
   gehandelt, auch gegenüber Alpacas Strom; Kopien als `news_dup`. Grund: Von 99 Ergebnisberichten vom
   17. bis 20.11. kamen nur 16 über PR Newswire. Alle drei Verteiler handeln (`[wires] trade`); Regeln
   des Handels sonst unverändert (erste Fassung).
+- 2026-11-22 (Joshs Vorschlag): Finnhub-Nachrichten als vierte Quelle, nur gemessen. Der Echtzeit-Strom
+  von Finnhub kostet; das kostenlose Konto beantwortet nur Abfragen (60 je Minute für alles). Der Bot
+  fragt alle 20 Sekunden die Marktnachrichten ab und alle zwei Minuten die Nachrichten jeder Firma, die
+  heute berichtet (höchstens 40). Finnhub sammelt bei anderen Seiten ein und dürfte später sein als die
+  Verteiler; gehandelt wird es erst, wenn `news_dup` zeigt, dass es oft zuerst da ist.
+

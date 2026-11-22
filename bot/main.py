@@ -15,6 +15,7 @@ from .executor import Executor
 from .fast import FastStrategy
 from .feedview import FeedView
 from .finnhub import Expectations, Finnhub
+from .finnhub_news import FinnhubNews
 from .llm import Classifier
 from .market import Session, StockStats, Universe
 from .news_strategy import OUTCOME_DELAY_MIN, NewsStrategy
@@ -72,7 +73,11 @@ class Bot:
         # Several sources report the same news: only the first report is rated and traded.
         self.first = FirstReport(self.journal, self.cfg["wires"].get("same_news_min", 15))
         # Immediate entry before the open and after the close, with what analysts expect of today's results.
-        self.expectations = Expectations(Finnhub(env("FINNHUB_API_KEY", "")), self.journal)
+        # Finnhub allows 60 calls a minute per key: 30 for the expectations, 28 for its news (measured, not traded).
+        self.expectations = Expectations(Finnhub(env("FINNHUB_API_KEY", ""), max_per_min=30), self.journal)
+        self.fh_news = FinnhubNews(Finnhub(env("FINNHUB_API_KEY", ""), max_per_min=28), self.cfg.get("finnhub_news"),
+                                   self.expectations, self.universe, self.on_wire, self.journal,
+                                   self.cfg["wires"]["max_age_s"])
         self.fast = FastStrategy(
             self.api, self.cfg, self.journal, self.session, self.universe, self.executor, self.llm,
             stats=self.news.stock_stats, expectations=self.expectations, fetch_text=self.wires.fetch_text,
@@ -103,11 +108,10 @@ class Bot:
     async def on_wire(self, art: dict):
         """A press release from the wire: the fast strategy takes it before the open and after the
         close, the old one during the regular session. Each decides by itself whether it is its turn."""
-        if not self.first.claim(art):
-            return
         trade = self.cfg["wires"].get("trade")
-        if trade is not None and art.get("source") not in trade:
-            return                      # this wire is only measured (wire_item), not rated or traded
+        traded = trade is None or art.get("source") in trade
+        if not self.first.claim(art, traded) or not traded:
+            return                      # a later copy, or a source that is only measured (wire_item)
         spawn(self.fast.on_article(art))
         await self.news.on_article(art)
 
@@ -200,7 +204,7 @@ class Bot:
             "market_open": s.is_open(), "news_stream": self.ws_connected,
             "llm_available": self.llm.available, "llm_model": self.llm.model, "llm_calls_today": self.llm.day_calls,
             "llm_shadow_calls": {c.model: c.day_calls for c in self.shadows},
-            "news": self.news.stats, "wires": self.wires.stats, "wire_sources": self.wires.by_source, "edgar": self.edgar.stats,
+            "news": self.news.stats, "wires": self.wires.stats, "wire_sources": {**self.wires.by_source, "finnhub": self.fh_news.stats}, "edgar": self.edgar.stats,
             "fast": self.fast.stats, "fast_enabled": bool(self.cfg["fast"]["enabled"]),
             "expectations": len(self.expectations.rows),
             "orb_stage": self.orb.stage, "orb_pool": len(self.orb.pool), "orb_watching": sorted(self.orb.ranges),
@@ -242,6 +246,7 @@ class Bot:
         self.fast.reset_day()
         self.orb.reset_day()
         self.wires.reset_day()
+        self.fh_news.reset_day()
         self.edgar.reset_day()
         for c in [self.llm, *self.shadows]:
             c.reset_day()
@@ -315,7 +320,8 @@ class Bot:
         log.info("bot started; llm=%s day=%s trading_day=%s", self.llm.available, self.session.day, self.session.trading_day)
         if not self.llm.available:
             log.warning("ANTHROPIC_API_KEY fehlt: News-Strategie inaktiv, nur Ausbruchs-Strategie läuft")
-        await asyncio.gather(self.news_loop(), self.control_loop(), self.wires.run(), self.edgar.run())
+        await asyncio.gather(self.news_loop(), self.control_loop(), self.wires.run(), self.edgar.run(),
+                             self.fh_news.run())
 
 
 def main():

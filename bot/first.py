@@ -9,6 +9,9 @@ Two reports count as the same news when they concern the same stock, arrive with
 minutes of each other and either have similar headlines or both report results (the wire's headline
 "Acme Reports Third Quarter Results" and Alpaca's "Acme Q3 EPS $1.20 Beats $1.10 Estimate" are the same
 news in different words).
+
+A source that is only measured, not traded, never blocks a traded one: if it was first, the traded
+report still goes through, and the `news_dup` row (blocked: false) records by how much it was beaten.
 """
 import re
 from datetime import timedelta
@@ -33,10 +36,10 @@ class FirstReport:
     def __init__(self, journal, window_min: float = 15, min_similarity: float = 0.5):
         self.journal, self.window = journal, timedelta(minutes=window_min)
         self.min_similarity = min_similarity
-        self.recent = {}     # symbol -> [(received, source, id, words, results, published)]
+        self.recent = {}     # symbol -> [(received, source, id, words, results, published, traded)]
         self.ids = set()
 
-    def claim(self, art: dict) -> bool:
+    def claim(self, art: dict, traded: bool = True) -> bool:
         """True if this is the first report of its news (rate and trade it), False for a later copy."""
         aid = art.get("id")
         if aid in self.ids:
@@ -48,23 +51,27 @@ class FirstReport:
             published = parse_ts(art["created_at"]) if art.get("created_at") else None
         except (TypeError, ValueError):
             published = None
+        noted = set()
         for sym in art.get("symbols") or []:
             keep = [r for r in self.recent.get(sym, []) if t - r[0] <= self.window]
             self.recent[sym] = keep
-            for received, source, first_id, fws, fresults, fpub in keep:
+            for received, source, first_id, fws, fresults, fpub, ftraded in keep:
                 sim = similar(ws, fws)
-                if sim >= self.min_similarity or (results and fresults):
+                if not (sim >= self.min_similarity or (results and fresults)) or first_id in noted:
+                    continue
+                noted.add(first_id)
+                self.journal.event(
+                    "news_dup", article=aid, source=art.get("source"), symbol=sym, headline=head[:140],
+                    first_article=first_id, first_source=source, lag_s=round((t - received).total_seconds(), 1),
+                    published_lag_s=(round((published - fpub).total_seconds()) if published and fpub else None),
+                    similarity=round(sim, 2), blocked=ftraded)
+                if ftraded:
                     self.ids.add(aid)
-                    self.journal.event(
-                        "news_dup", article=aid, source=art.get("source"), symbol=sym, headline=head[:140],
-                        first_article=first_id, first_source=source, lag_s=round((t - received).total_seconds(), 1),
-                        published_lag_s=(round((published - fpub).total_seconds()) if published and fpub else None),
-                        similarity=round(sim, 2))
                     return False
         self.ids.add(aid)
         # A roundup naming many stocks is nobody's first report: it must not block a stock's own release.
         for sym in (art.get("symbols") or []) if len(art.get("symbols") or []) <= 2 else []:
-            self.recent.setdefault(sym, []).append((t, art.get("source"), aid, ws, results, published))
+            self.recent.setdefault(sym, []).append((t, art.get("source"), aid, ws, results, published, traded))
         if len(self.ids) > 50000:
             self.ids.clear()
         return True

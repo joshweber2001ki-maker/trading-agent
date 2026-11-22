@@ -409,6 +409,60 @@ def test_a_copy_from_another_wire_is_neither_rated_nor_traded(tmp_path):
     assert got == ["bw:1", "bw:1"]                 # the fast and the old strategy each saw the first report once
 
 
+def test_finnhub_news_is_measured_and_never_blocks_a_traded_wire(tmp_path, monkeypatch):
+    from bot import finnhub_news as fn_mod, first as first_mod
+    from bot.finnhub_news import FinnhubNews, to_article as fh_article
+    from bot.first import FirstReport
+    t0 = datetime(2026, 11, 23, 21, 6, tzinfo=timezone.utc)
+    clock = [t0]
+    monkeypatch.setattr(fn_mod, "now", lambda: clock[0])
+    monkeypatch.setattr(first_mod, "now", lambda: clock[0])
+    uni = {"ACME": {}, "BETA": {}}
+    item = lambda i, head, related="ACME", ago=60: {"id": i, "headline": head, "related": related, "source": "Yahoo",
+                                                  "datetime": int((t0 - timedelta(seconds=ago)).timestamp()), "summary": "s"}
+    a = fh_article(item(1, "Acme Q3 Results Top Estimates"), None, uni, 420)
+    assert a["symbols"] == ["ACME"] and a["source"] == "finnhub" and a["created_at"] == "2026-11-23T21:05:00Z"
+    assert fh_article(item(2, "x", "ACME,BETA"), None, uni, 420) is None           # two of ours: unclear
+    assert fh_article(item(3, "x", "BETA"), "ACME", uni, 420) is None              # asked for Acme, about Beta
+    assert fh_article(item(4, "x", ""), "ACME", uni, 420)["symbols"] == ["ACME"]
+
+    class Fh:
+        available = True
+        def __init__(self): self.answers = {}
+        async def get(self, path, **p): return self.answers.get((path, p.get("category") or p.get("symbol")), [])
+
+    class Uni: cache = uni
+    class Exp: rows = {"ACME": {"date": "2026-11-23"}, "BETA": {"date": "2026-11-24"}}
+    got = []
+    async def on_article(x): got.append(x["id"])
+    fh = Fh()
+    news = FinnhubNews(fh, {"enabled": True}, Exp(), Uni(), on_article, Journal(tmp_path))
+    assert news.reporters() == ["ACME"]
+
+    async def run():
+        fh.answers[("/news", "general")] = [item(10, "Old news", ago=30)]
+        await news.market("general")                       # first call: what is there is not news
+        fh.answers[("/news", "general")] = [item(10, "Old news", ago=30), item(11, "Beta Wins Contract", "BETA")]
+        await news.market("general")
+        fh.answers[("/company-news", "ACME")] = [item(12, "Acme Reports Q3 Results"), item(13, "Acme last week", ago=86400)]
+        await news.company("ACME")
+        await asyncio.sleep(0)
+    asyncio.run(run())
+    assert got == ["finnhub:11", "finnhub:12"] and news.min_id["general"] == 11
+
+    # Finnhub first, the wire 30 s later: the wire is still traded, and the row says Finnhub was earlier
+    f = FirstReport(Journal(tmp_path))
+    assert f.claim({"id": "finnhub:12", "source": "finnhub", "symbols": ["ACME"], "headline": "Acme Reports Q3 Results"}, traded=False)
+    clock[0] += timedelta(seconds=30)
+    assert f.claim({"id": "gnw:1", "source": "globenewswire", "symbols": ["ACME"], "headline": "Acme Reports Third Quarter Results"})
+    clock[0] += timedelta(seconds=30)
+    assert not f.claim({"id": "finnhub:14", "source": "finnhub", "symbols": ["ACME"], "headline": "Acme reports Q3 results"}, traded=False)
+    rows = [json.loads(l) for p in (tmp_path / "logs").glob("events-*.jsonl") for l in p.read_text().splitlines()]
+    dups = [(r["source"], r["first_source"], r["blocked"]) for r in rows if r["kind"] == "news_dup"]
+    assert dups == [("globenewswire", "finnhub", False), ("finnhub", "finnhub", False), ("finnhub", "globenewswire", True)]
+    assert sum(1 for r in rows if r["kind"] == "wire_item" and r["source"] == "finnhub") == 2
+
+
 # ── simulated broker ─────────────────────────────────────────────────────────
 class FakeSession:
     def __init__(self):
