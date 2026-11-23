@@ -632,4 +632,7 @@ Kurs. Die SEC-Liste lief ab 22:07 Uhr wieder.
   fragt alle 20 Sekunden die Marktnachrichten ab und alle zwei Minuten die Nachrichten jeder Firma, die
   heute berichtet (höchstens 40). Finnhub sammelt bei anderen Seiten ein und dürfte später sein als die
   Verteiler; gehandelt wird es erst, wenn `news_dup` zeigt, dass es oft zuerst da ist.
+- 2026-11-23: GlobeNewswire weist den Server ab (403 bei jedem Abruf seit 0:07 UTC, auch mit Accept-Kopf
+  und zehn Minuten Pause). Aus der Feed-Liste genommen; nicht umgangen. Business Wire, PR Newswire und
+  Finnhub laufen.
 

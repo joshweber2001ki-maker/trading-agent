@@ -156,7 +156,7 @@ fast_poll_s = 10    # der Haupt-Feed jedes Verteilers (jeweils der erste in der 
 poll_s      = 60    # die Themen-Feeds
 max_age_s   = 420   # so alt darf eine Pressemitteilung für einen Trade höchstens sein
 same_news_min = 15  # gleiche Aktie, ähnliche Überschrift oder beides Ergebnisse binnen 15 Minuten = dieselbe Nachricht
-trade = ["prnewswire", "globenewswire", "businesswire"]   # diese Verteiler werden bewertet und gehandelt; fehlt einer, wird er nur gemessen
+trade = ["prnewswire", "businesswire", "globenewswire"]   # diese Verteiler werden bewertet und gehandelt; fehlt einer, wird er nur gemessen
 # PR Newswire
 feeds = [
   "https://www.prnewswire.com/rss/news-releases-list.rss",
@@ -172,10 +172,7 @@ feeds = [
 ]
 
 [wires.more]
-globenewswire = [
-  "https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20about%20Public%20Companies",
-  "https://www.globenewswire.com/RssFeed/subjectcode/13-Earnings%20Releases%20and%20Operating%20Results/feedTitle/GlobeNewswire%20-%20Earnings%20Releases%20and%20Operating%20Results",
-]
+# globenewswire: weist den Server ab (403 seit dem ersten Abruf am 23.11., auch mit Pause); Code bleibt, Feeds siehe Git-Historie
 businesswire = [
   "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeEF9YXA==",   # Ergebnisse
   "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeEFtRWA==",   # Übernahmen

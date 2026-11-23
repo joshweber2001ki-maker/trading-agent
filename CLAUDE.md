@@ -19,7 +19,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/orb_strategy.py` | Ausbruch aus der Eröffnungsspanne (abgeschaltet seit 17.11.2026) |
 | `bot/executor.py` | Positionsgröße, Risikogrenzen, Order mit Stop und Ziel, Zeitlimit, Glattstellen. Vor und nach der Börse (`[extended]`): nur Limit-Orders; Stop und Zeitlimit überwacht der Bot selbst, am Kurs, mit dem der Broker die offene Position bewertet |
 | `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API. Ein Modell entscheidet (`[llm] model`), weitere bewerten zum Vergleich mit (`shadow`); jedes Modell braucht eine eigene Form der Anfrage |
-| `bot/wires.py` | Pressemitteilungen von PR Newswire, GlobeNewswire und Business Wire (seit 22.11.), je Verteiler die Zuordnung zum Börsenkürzel; Haupt-Feeds alle 10 s, Themen-Feeds jede Minute (`[wires]`) |
+| `bot/wires.py` | Pressemitteilungen von PR Newswire und Business Wire (seit 23.11.; GlobeNewswire ist eingebaut, weist den Server aber ab: 403), je Verteiler die Zuordnung zum Börsenkürzel; Haupt-Feeds alle 10 s, Themen-Feeds jede Minute (`[wires]`) |
 | `bot/finnhub_news.py` | Nachrichten von Finnhub (kostenloses Konto): Marktnachrichten und die Nachrichten der Firmen, die heute berichten; nur gemessen, nicht gehandelt (`[finnhub_news]`) |
 | `bot/first.py` | dieselbe Nachricht aus mehreren Quellen: nur die erste wird bewertet und gehandelt, jede spätere Kopie protokolliert (`news_dup`, mit Verspätung) |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
@@ -83,8 +83,8 @@ Worten in `memory/strategy.md`, „Erste Fassung im Handel“. Jede Änderung da
 
 **Was läuft**
 - Vor Börsenbeginn (10:00 bis 15:20 Uhr deutscher Zeit) und nach Börsenschluss (22:00 bis 1:45 Uhr):
-  `bot/fast.py`. Quellen sind seit dem 22.11. PR Newswire (im Median zwei Minuten zu spät),
-  GlobeNewswire und Business Wire (Verspätung noch nicht gemessen); PR Newswire allein trug nur
+  `bot/fast.py`. Quellen sind seit dem 23.11. PR Newswire (im Median zwei Minuten zu spät) und
+  Business Wire (Verspätung noch nicht gemessen); GlobeNewswire weist den Server ab (403); PR Newswire allein trug nur
   16 von 99 Ergebnisberichten der Woche bis 20.11. Kommt dieselbe Nachricht mehrfach, zählt die erste. Bewertet wird mit dem Modell aus `[llm]`, mit vollem Text der Meldung und, wenn die Firma
   gerade berichtet, mit den Erwartungen von Finnhub.
 - Der Bot hat dort keinen Kurs in Echtzeit (die kostenlose Kursquelle zeigt fast nichts, Alpacas
