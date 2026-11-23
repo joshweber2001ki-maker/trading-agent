@@ -1,0 +1,23 @@
+{"t": "2026-11-22T05:00:02Z", "kind": "day_start", "day": "2026-11-22", "trading_day": false, "universe": 12678, "equity": 102072.98, "last_equity": 102072.98, "llm": true, "llm_model": "claude-opus-5-5", "llm_shadow": ["claude-haiku-5-5", "claude-sonnet-5-5"], "news": true, "orb": false, "extended": true, "fast": true}
+{"t": "2026-11-22T05:00:04Z", "kind": "expectations", "companies": 136, "with_eps": 43, "with_revenue": 41}
+{"t": "2026-11-22T17:01:19Z", "kind": "wire_item", "id": "prnewswire:red-losses-are-encouraged-to-contact-the-firm-302946397.html", "symbol": "EYPT", "published": "2026-11-22T17:00:00Z", "headline": "SHAREHOLDER ALERT: Bronstein Gewirtz & Grossman, LLC Announces Class Action Against EyePoint, Inc. (NASDAQ: EYPT) -- Investors Who Suffered ", "source": "prnewswire", "company": "Bronstein, Gewirtz & Grossman, LLC"}
+{"t": "2026-11-22T17:01:19Z", "kind": "wire_item", "id": "prnewswire:red-losses-are-encouraged-to-contact-the-firm-302946384.html", "symbol": "BBW", "published": "2026-11-22T17:00:00Z", "headline": "SHAREHOLDER ALERT: Bronstein Gewirtz & Grossman, LLC Announces Class Action Against Build-A-Bear Workshop, Inc. (NYSE: BBW) -- Investors Who", "source": "prnewswire", "company": "Bronstein, Gewirtz & Grossman, LLC"}
+{"t": "2026-11-22T22:28:14Z", "kind": "error", "where": "news_ws", "error": "ConnectionClosedError(None, None, None)"}
+{"t": "2026-11-22T22:28:17Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 406, 'msg': 'connection limit exceeded'}"}
+{"t": "2026-11-22T22:28:17Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 401, 'msg': 'not authenticated'}"}
+{"t": "2026-11-22T22:28:27Z", "kind": "error", "where": "news_ws", "error": "ConnectionClosedError(None, None, None)"}
+{"t": "2026-11-22T22:28:31Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 406, 'msg': 'connection limit exceeded'}"}
+{"t": "2026-11-22T22:28:31Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 401, 'msg': 'not authenticated'}"}
+{"t": "2026-11-22T22:28:41Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 404, 'msg': 'auth timeout'}"}
+{"t": "2026-11-22T22:28:41Z", "kind": "error", "where": "news_ws", "error": "ConnectionClosedError(None, None, None)"}
+{"t": "2026-11-22T22:28:49Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 406, 'msg': 'connection limit exceeded'}"}
+{"t": "2026-11-22T22:28:49Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 401, 'msg': 'not authenticated'}"}
+{"t": "2026-11-22T22:28:59Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 404, 'msg': 'auth timeout'}"}
+{"t": "2026-11-22T22:28:59Z", "kind": "error", "where": "news_ws", "error": "ConnectionClosedError(None, None, None)"}
+{"t": "2026-11-22T22:29:16Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 406, 'msg': 'connection limit exceeded'}"}
+{"t": "2026-11-22T22:29:16Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 401, 'msg': 'not authenticated'}"}
+{"t": "2026-11-22T22:29:26Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 404, 'msg': 'auth timeout'}"}
+{"t": "2026-11-22T22:29:26Z", "kind": "error", "where": "news_ws", "error": "ConnectionClosedError(None, None, None)"}
+{"t": "2026-11-22T22:29:58Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 406, 'msg': 'connection limit exceeded'}"}
+{"t": "2026-11-22T22:29:58Z", "kind": "error", "where": "news_ws", "error": "{'T': 'error', 'code': 401, 'msg': 'not authenticated'}"}
+{"t": "2026-11-22T22:30:08Z", "kind": "error", "where": "news_ws", "error": "ConnectionClosedError(None, None, None)"}
