@@ -1,6 +1,6 @@
 {
- "t": "2026-11-23T00:06:40Z",
- "version": "f812d905f621d4659537f144b921466535f5d4c8",
+ "t": "2026-11-23T01:06:24Z",
+ "version": "cc6430a35217be1dacaff6f989c9094f4878c45e",
  "day": "2026-11-22",
  "trading_day": false,
  "market_open": false,
@@ -13,15 +13,41 @@
   "claude-sonnet-5-5": 0
  },
  "news": {
-  "received": 122,
+  "received": 69,
   "classified": 0,
   "candidates": 0
  },
  "wires": {
-  "polls": 11223,
-  "items": 31,
-  "matched": 2,
-  "errors": 0
+  "polls": 1883,
+  "items": 220,
+  "matched": 64,
+  "errors": 411
+ },
+ "wire_sources": {
+  "prnewswire": {
+   "polls": 884,
+   "items": 195,
+   "matched": 58,
+   "errors": 0
+  },
+  "globenewswire": {
+   "polls": 411,
+   "items": 0,
+   "matched": 0,
+   "errors": 411
+  },
+  "businesswire": {
+   "polls": 588,
+   "items": 25,
+   "matched": 6,
+   "errors": 0
+  },
+  "finnhub": {
+   "polls": 377,
+   "items": 0,
+   "matched": 0,
+   "errors": 0
+  }
  },
  "edgar": {
   "polls": 0,
@@ -36,13 +62,13 @@
   "entered": 0
  },
  "fast_enabled": true,
- "expectations": 136,
+ "expectations": 134,
  "orb_stage": "idle",
  "orb_pool": 0,
  "orb_watching": [],
  "open_trades": [],
  "trades_today": 0,
- "errors_today": 6,
+ "errors_today": 0,
  "flattened": false,
  "phase": null,
  "extended": true
