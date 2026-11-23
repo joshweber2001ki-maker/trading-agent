@@ -1,57 +1,57 @@
 {
- "t": "2026-11-23T20:07:02Z",
+ "t": "2026-11-23T21:06:08Z",
  "version": "893ac96cd7e22a2aff31f872ce0e7926166b5588",
  "day": "2026-11-23",
  "trading_day": true,
- "market_open": true,
+ "market_open": false,
  "news_stream": true,
  "llm_available": true,
  "llm_model": "claude-opus-5-5",
- "llm_calls_today": 198,
+ "llm_calls_today": 202,
  "llm_shadow_calls": {
   "claude-haiku-5-5": 168,
   "claude-sonnet-5-5": 168
  },
  "news": {
-  "received": 1042,
+  "received": 1068,
   "classified": 168,
   "candidates": 1
  },
  "wires": {
-  "polls": 13463,
-  "items": 907,
-  "matched": 157,
+  "polls": 14933,
+  "items": 960,
+  "matched": 165,
   "errors": 0
  },
  "wire_sources": {
   "prnewswire": {
-   "polls": 8074,
-   "items": 690,
-   "matched": 116,
+   "polls": 8957,
+   "items": 721,
+   "matched": 124,
    "errors": 0
   },
   "businesswire": {
-   "polls": 5389,
-   "items": 217,
+   "polls": 5976,
+   "items": 239,
    "matched": 41,
    "errors": 0
   },
   "finnhub": {
-   "polls": 13423,
-   "items": 84,
+   "polls": 14879,
+   "items": 96,
    "matched": 0,
    "errors": 8
   }
  },
  "edgar": {
-  "polls": 54,
-  "filings": 130,
-  "matched": 88,
+  "polls": 60,
+  "filings": 140,
+  "matched": 89,
   "errors": 0
  },
  "fast": {
-  "received": 134,
-  "rated": 30,
+  "received": 139,
+  "rated": 34,
   "candidates": 0,
   "entered": 0
  },
@@ -63,7 +63,7 @@
  "open_trades": [],
  "trades_today": 0,
  "errors_today": 0,
- "flattened": false,
- "phase": "regular",
+ "flattened": true,
+ "phase": "post",
  "extended": true
 }
