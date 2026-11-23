@@ -178,7 +178,8 @@ def to_article(item: dict, index: NameIndex, universe: dict, source: str, max_ag
 class Wires:
     def __init__(self, cfg: dict, universe, on_article, journal):
         self.cfg, self.universe, self.on_article, self.journal = cfg, universe, on_article, journal
-        self.http = httpx.AsyncClient(timeout=15, headers={"User-Agent": UA}, follow_redirects=True)
+        self.http = httpx.AsyncClient(timeout=15, follow_redirects=True, headers={
+            "User-Agent": UA, "Accept": "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.5"})
         self.seen = set()
         self.modified = {}     # feed url -> Last-Modified
         self.index = None
@@ -268,4 +269,9 @@ class Wires:
                 n = self.by_source[source]["errors"]
                 if n <= 20 or n % 100 == 0:
                     self.journal.event("error", where="wires", source=source, feed=url[-60:], error=repr(e)[:200])
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                if status in (403, 429):
+                    # refused or too often: do not keep knocking; try again in ten minutes
+                    await asyncio.sleep(max(600.0, every_s))
+                    continue
             await asyncio.sleep(max(2.0, every_s))

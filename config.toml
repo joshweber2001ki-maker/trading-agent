@@ -152,7 +152,7 @@ static_pool = ["NVDA", "TSLA", "AMD", "META", "AMZN", "AAPL", "MSFT", "PLTR", "C
 # Jede Firma nutzt einen Verteiler; erst alle zusammen decken die meisten Berichte ab.
 # Kommt dieselbe Nachricht mehrfach (zweiter Verteiler, Alpacas Strom), zählt nur die erste.
 enabled     = true
-fast_poll_s = 10    # der Haupt-Feed jedes Verteilers (jeweils der erste in der Liste)
+fast_poll_s = 10    # der Haupt-Feed jedes Verteilers (jeweils der erste in der Liste); abgewiesene Feeds (403, 429) erst nach 10 Minuten wieder
 poll_s      = 60    # die Themen-Feeds
 max_age_s   = 420   # so alt darf eine Pressemitteilung für einen Trade höchstens sein
 same_news_min = 15  # gleiche Aktie, ähnliche Überschrift oder beides Ergebnisse binnen 15 Minuten = dieselbe Nachricht
