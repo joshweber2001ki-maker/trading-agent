@@ -1,5 +1,5 @@
 {
- "t": "2026-11-23T06:06:36Z",
+ "t": "2026-11-23T07:06:37Z",
  "version": "cc6430a35217be1dacaff6f989c9094f4878c45e",
  "day": "2026-11-23",
  "trading_day": true,
@@ -13,38 +13,38 @@
   "claude-sonnet-5-5": 0
  },
  "news": {
-  "received": 25,
+  "received": 36,
   "classified": 0,
   "candidates": 0
  },
  "wires": {
-  "polls": 2121,
-  "items": 36,
-  "matched": 25,
-  "errors": 464
+  "polls": 4038,
+  "items": 55,
+  "matched": 33,
+  "errors": 883
  },
  "wire_sources": {
   "businesswire": {
-   "polls": 663,
-   "items": 2,
+   "polls": 1262,
+   "items": 9,
    "matched": 1,
    "errors": 0
   },
   "globenewswire": {
-   "polls": 464,
+   "polls": 883,
    "items": 0,
    "matched": 0,
-   "errors": 464
+   "errors": 883
   },
   "prnewswire": {
-   "polls": 994,
-   "items": 34,
-   "matched": 24,
+   "polls": 1893,
+   "items": 46,
+   "matched": 32,
    "errors": 0
   },
   "finnhub": {
-   "polls": 1663,
-   "items": 7,
+   "polls": 3175,
+   "items": 14,
    "matched": 0,
    "errors": 0
   }
