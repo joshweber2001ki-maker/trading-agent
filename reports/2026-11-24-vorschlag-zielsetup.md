@@ -9,10 +9,12 @@ die Messwerte stammen aus den Protokollen des Bots vom 13. bis 24.11. Alle Uhrze
 **Nachtrag vom 24.11.2026, Abend:** Josh hat den Vorschlag freigegeben („Lass uns das so alles umbauen …
 Wir nehmen alles, was kostenlos ist und hilft“). Umgesetzt und ab dem Neustart am Abend aktiv sind aus
 Abschnitt 5 die Punkte 1 bis 4 und 7: SEC-Liste alle 2 Sekunden mit Text und Bewertung, Probe und Einstieg
-nur bei enger Spanne, Sofort-Einstieg auch in der Handelszeit, WireAlpha als gemessene Quelle (läuft, sobald
+nur bei enger Spanne, Sofort-Einstieg auch in der Handelszeit, WireAlpha als Quelle (läuft, sobald
 der Schlüssel eingetragen ist), Kanzlei-Filter, Alpacas Strom und die Finnhub-Nachrichten aus, Haiku und
-Sonnet bewerten mit. Offen sind die Punkte 5 und 6 (abendliche Prüfung der Ausführungen, Dossier) und die
-Entscheidung 3 aus Abschnitt 7: SEC-Meldungen werden bis zu Joshs Antwort bewertet, aber nicht gehandelt.
+Sonnet bewerten mit. Offen sind die Punkte 5 und 6 (abendliche Prüfung der Ausführungen, Dossier).
+Entscheidung 3 aus Abschnitt 7 hat Josh am selben Abend getroffen: „alles direkt handeln, kein voriges
+Messen, ist ja Paper-Trading“. SEC-Meldungen und die vier Verteiler über WireAlpha werden deshalb von Anfang
+an gehandelt; das Freischalten nach Meldungstyp aus Abschnitt 3 entfällt, die Statistik je Typ bleibt.
 Interactive Brokers folgt, wenn Josh dort ein Konto hat. Der Stand steht in `memory/strategy.md`,
 „Zweite Fassung im Handel“.
 

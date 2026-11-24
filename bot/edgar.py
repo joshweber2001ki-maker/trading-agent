@@ -1,7 +1,7 @@
 """Company filings with the SEC (form 8-K): which company, accepted at which second, and what it says.
 
 Two uses. Every filing is logged (`sec_item`) to measure how fast prices react to it. And a fresh
-filing can be handed on (`on_filing`) to be read and rated: for announcements other than quarterly
+filing can be handed on (`on_filing`) to be read, rated and traded: for announcements other than quarterly
 results the filing is often the first or the only publication, and prices take a minute or two to
 react to it (measured 13. to 23.11.2026).
 
@@ -236,22 +236,23 @@ class Edgar:
         """What the filing says (see filing_text); empty if it cannot be fetched in time. The
         submission file can be large (graphics): only its beginning is read."""
         url, limit, buf = submission_url(e), self.cfg.get("text_max_bytes", 600_000), b""
-        for attempt in (1, 2):
-            if attempt == 2:
-                await asyncio.sleep(1.0)    # listed a moment before the file is there: one more try
+        for pause in (0, 1.0, 2.0):         # a filing can be listed a moment before its file is there: two more tries
+            if pause:
+                await asyncio.sleep(pause)
             try:
                 async with self.http.stream("GET", url, timeout=self.cfg.get("text_timeout_s", 6)) as r:
-                    if r.status_code == 200:
-                        async for chunk in r.aiter_bytes():
-                            buf += chunk
-                            if len(buf) >= limit:
-                                break
-                        break
-                    if r.status_code != 404:
+                    if r.status_code == 404:
+                        continue
+                    if r.status_code != 200:
                         return ""
+                    async for chunk in r.aiter_bytes():
+                        buf += chunk
+                        if len(buf) >= limit:
+                            break
             except Exception:
-                return ""
-        return filing_text(decode(buf))
+                pass                        # what was read until then still counts
+            break
+        return filing_text(decode(buf)) if buf else ""
 
     def in_hours(self):
         """The SEC accepts filings on weekdays from 6:00 to 22:00 New York time."""

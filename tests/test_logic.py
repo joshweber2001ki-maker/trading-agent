@@ -1369,10 +1369,12 @@ def test_weekly_stats_tell_press_releases_from_filings_and_show_the_look_at_the_
                                                model="claude-haiku-5-5", model_s=0.6)
     path = lambda src, art, r300: ev("news_speed", 3000, src=src, ref=art, symbol="ACME", t0="2026-11-24T15:00:00Z",
                                      session="regular", ref_age_s=10, r60=r300 / 4, r300=r300, r900=r300, usd_60_300=900000)
-    rows = [rated(60, "prnewswire", "p1", v("up", "contract")), path("prnewswire", "p1", 2.0),
+    rows = [rated(60, "wa-prnewswire", "wa-prnewswire:p1", v("up", "contract")) | {"published": "2026-11-24T15:00:20Z"},
+            path("prnewswire", "p1", 2.0),          # measured once, under the wire's own copy of the same minute
             rated(61, "sec", "0001-26-1", v("down")), path("sec", "0001-26-1", -1.5),
             rated(62, "sec", "0001-26-2", v("up")), path("sec", "0001-26-2", -1.0),          # wrong
-            shadow(60, "prnewswire", "p1", v("up")), shadow(61, "sec", "0001-26-1", v("up")),  # the second disagrees, and is wrong
+            shadow(60, "wa-prnewswire", "wa-prnewswire:p1", v("up")) | {"published": "2026-11-24T15:00:20Z"},
+            shadow(61, "sec", "0001-26-1", v("up")),                                           # disagrees, and is wrong
             ev("fast_shadow", 62, article="0001-26-2", source="sec", model="claude-haiku-5-5", verdict=None, error="llm_http_529"),
             ev("fast_probe", 63, symbol="ACME", ok=True, seconds=0.8, bid=99.95, ask=100.05, spread_pct=0.1),
             ev("fast_probe", 64, symbol="BETA", ok=False, seconds=3.4, reason="spread"),
@@ -1603,9 +1605,12 @@ def test_trading_runs_with_the_values_josh_approved_on_19_and_24_november():
     # the old rule with price confirmation and Alpaca's news stream are off; the model is still the one Josh chose
     assert CFG["news"]["enabled"] is False and CFG["news"]["stream"] is False and CFG["orb"]["enabled"] is False
     assert CFG["llm"]["model"] == "claude-opus-5-5"
-    # filings with the SEC are read and rated, but not traded before Josh says so; WireAlpha is only measured
-    assert CFG["edgar"]["rate"] is True and CFG["edgar"]["trade"] is False and CFG["edgar"]["fast_poll_s"] >= 1
-    assert not [s for s in CFG["wires"]["trade"] if s.startswith("wa-")] and CFG["finnhub_news"]["enabled"] is False
+    # Josh on 24.11.: trade everything at once, no measuring first. Filings with the SEC are traded, and so are the
+    # four wires that come over WireAlpha; the filings WireAlpha reports are a copy of the SEC's list and only measured
+    assert CFG["edgar"]["rate"] is True and CFG["edgar"]["trade"] is True and CFG["edgar"]["fast_poll_s"] >= 1
+    assert sorted(s for s in CFG["wires"]["trade"] if s.startswith("wa-")) == [
+        "wa-accesswire", "wa-businesswire", "wa-globenewswire", "wa-prnewswire"]
+    assert "sec_edgar" in CFG["wirealpha"]["sources"] and CFG["finnhub_news"]["enabled"] is False
     assert (fast["min_surprise"], fast["min_confidence"], fast["min_impact"], fast["max_age_s"]) == (7, 7, 1, 300)
     assert fast["expected_move_pct"] == {"1": 2.0, "2": 5.0, "3": 10.0} and fast["chase_frac"] == 0.5
     assert (fast["stop_mult"], fast["entry_timeout_s"], fast["risk_pct"]) == (1.5, 15, 0.25)
@@ -2179,20 +2184,24 @@ def test_a_whole_morning_and_evening_out_of_hours_through_the_running_bot(tmp_pa
                 async def get(self, syms):
                     return {x: {"price": 100.0, "dollar_volume": 5e7, "daily_range_pct": 2.5, "size": "mid-sized"} for x in syms}
             b.fast.llm, b.fast.stock_stats = FakeModel("claude-opus-5-5", "up"), Stats()
-            # A filing with the SEC is read and rated, but not traded: that switch is still off.
+            # A filing with the SEC, seen 50 seconds after it was accepted: read, rated and traded.
             async def what_it_says(entry): return "Item 8.01 Other Events. Acme won a large contract."
             b.edgar.text = what_it_says
             await b.on_filing({"acc": "0000000011-26-000001", "form": "8-K", "company": "ACME CORP", "cik": 11,
                                "accepted": t - timedelta(seconds=50), "items": ["8.01"], "link": ""}, "ACME")
-            assert not b.executor.trades and not await broker.positions() and seen("fast_rated") == 1
-            await b.on_wire({"id": "prnewswire:e2e", "headline": "Acme raises outlook", "summary": "", "source": "prnewswire",
-                             "symbols": ["ACME"], "url": "", "created_at": iso(t - timedelta(seconds=100))})
-            await until("position from the press release", holding)
+            await until("position from the filing", holding)
             fast_trade = next(iter(b.executor.trades.values()))
             assert (fast_trade.strategy, fast_trade.phase, fast_trade.entry_price) == ("fast", "post", 100.05)
+            assert fast_trade.meta["source"] == "sec" and fast_trade.meta["article"] == "0000000011-26-000001"
             # one share there and back showed bid and offer; the order then went out just above the offer
             assert fast_trade.meta["market"]["how"] == "probe" and fast_trade.meta["market"]["spread_pct"] == 0.1
             assert broker.orders[fast_trade.order_id]["payload"]["limit_price"] == "100.25" and broker.pos["ACME"] == fast_trade.qty
+            # The company's press release follows: rated (the model is told what was seen before), no second position.
+            await b.on_wire({"id": "prnewswire:e2e", "headline": "Acme wins large contract", "summary": "", "source": "prnewswire",
+                             "symbols": ["ACME"], "url": "", "created_at": iso(t - timedelta(seconds=20))})
+            await until("press release rated and turned away", lambda: seen("fast_rejected") == 1)
+            assert len(b.executor.trades) == 1 and broker.pos["ACME"] == fast_trade.qty
+            assert "files 8-K with the SEC" in b.fast.llm.asked[-1]["context"]
             s.ext_close = datetime.now(timezone.utc) + timedelta(minutes=14)   # the last minutes after the close
             await until("day's summary", lambda: seen("day_end") >= 1)
         finally:
@@ -2211,10 +2220,10 @@ def test_a_whole_morning_and_evening_out_of_hours_through_the_running_bot(tmp_pa
     assert [(r["exit_reason"], r["style"], r["phase"], r["strategy"]) for r in trades] == [
         ("stop", "soft", "pre", "fast"), ("session_end", "soft", "pre", "fast"), ("session_end", "soft", "post", "fast")]
     assert kinds["fast_rated"] == 2 and trades[2]["meta"]["ref_price"] == 99.0 and trades[2]["price_changes"] >= 1
-    assert [(r["source"], r["reason"]) for r in rows if r["kind"] == "fast_rejected"] == [("sec", "source_off")]
+    assert [(r["source"], r["reason"]) for r in rows if r["kind"] == "fast_rejected"] == [("prnewswire", "already_in_symbol")]
     assert kinds["fast_probe"] == 1 and kinds["fast_shadow"] == 4      # two more models are asked about both announcements
     start = next(r for r in rows if r["kind"] == "day_start")
-    assert (start["news"], start["look"], start["sec_rated"], start["sec_traded"], start["wirealpha"]) == (False, True, True, False, False)
+    assert (start["news"], start["look"], start["sec_rated"], start["sec_traded"], start["wirealpha"]) == (False, True, True, True, False)
     assert [r["phase"] for r in rows if r["kind"] == "session_end"] == ["pre", "post"]
     assert broker.market_closes == 0 and broker.cancel_alls >= 2 and not await_none(broker.open_orders())
     daily = json.loads((tmp_path / "logs" / "daily" / f"{day}.json").read_text())
@@ -2708,6 +2717,37 @@ def test_during_the_session_the_immediate_entry_looks_first_and_leaves_stop_and_
     assert not [r for r in rows if r["kind"] == "error"]
 
 
+def test_the_model_is_told_what_was_seen_of_the_company_before_and_a_headline_can_be_rated_alone(fast_rig, monkeypatch):
+    api, sess, ex, tmp, clock, events, make, article, fast_mod = fast_rig
+    monkeypatch.setattr(fast_mod, "now", lambda: clock["t"])
+    model = FakeModel("claude-opus-5-5", "none")
+    fast = make(model, cfg=FAST_V2)
+    fetched = []
+
+    async def no_text():
+        fetched.append(1)
+        return ""
+
+    async def go():
+        await fast.on_article({**article(1, head="Acme to be acquired by Beta for $42 a share"), "url": "",
+                               "source": "wa-globenewswire", "fetch": no_text, "text_optional": True})
+        clock["t"] += timedelta(minutes=3)
+        await fast.on_article({**article(2, age_s=50, head="ACME CORP files 8-K with the SEC: Other Events"), "source": "sec",
+                               "note": "This is a filing.", "fetch": lambda: await_text("Item 8.01 Acme agreed to be acquired.")})
+        clock["t"] += timedelta(hours=80)                      # days later the old announcements are forgotten
+        fast.reset_day()
+        await fast.on_article(article(3, head="Acme names new finance chief"))
+    asyncio.run(go())
+    first, filing, later = model.asked
+    assert fetched == [1] and "text" not in first["article"] or first["article"]["text"] == ""      # rated by its headline
+    assert first["context"] is None and later["context"] is None
+    assert filing["context"].startswith("This is a filing.\nAnnouncements of this company that the system has already seen")
+    assert "(wa-globenewswire): Acme to be acquired by Beta for $42 a share" in filing["context"]
+    rated = events("fast_rated")
+    assert [r.get("seen_before") for r in rated] == [None, True, None] and [r["with_text"] for r in rated] == [False, True, False]
+    assert not events("fast_skipped")
+
+
 def test_a_rating_that_comes_back_after_the_open_obeys_the_rules_of_the_new_session(fast_rig, monkeypatch):
     api, sess, ex, tmp, clock, events, make, article, fast_mod = fast_rig
     monkeypatch.setattr(fast_mod, "now", lambda: clock["t"])
@@ -2947,7 +2987,7 @@ def test_between_two_complete_looks_the_sec_list_is_asked_every_few_seconds(tmp_
     assert e.stats["errors"] == 4
 
 
-def test_a_filing_goes_to_the_immediate_entry_rated_but_not_traded_until_josh_says_so(tmp_path):
+def test_a_filing_goes_to_the_immediate_entry_and_one_switch_decides_whether_it_is_traded(tmp_path):
     from bot.edgar import Edgar
     from bot.first import FirstReport
     from bot.main import Bot
@@ -2963,7 +3003,7 @@ def test_a_filing_goes_to_the_immediate_entry_rated_but_not_traded_until_josh_sa
     b = Bot.__new__(Bot)
     b.first, b.fast, b.journal, b.errors = FirstReport(j), Strat(), j, 0
     b.edgar = Edgar(CFG["edgar"], "", Uni(), j)
-    b.cfg = {"edgar": dict(CFG["edgar"])}
+    b.cfg = {"edgar": {**CFG["edgar"], "trade": False}}                 # the switch off: rated to measure, not traded
     t = datetime.now(timezone.utc)
     entry = lambda acc, items: {"acc": acc, "form": "8-K", "company": "ACME CORP", "cik": 11, "accepted": t, "items": items, "link": ""}
 
@@ -2972,7 +3012,7 @@ def test_a_filing_goes_to_the_immediate_entry_rated_but_not_traded_until_josh_sa
         await b.on_filing(entry("F2", ["2.02", "9.01"]), "ACME")       # quarterly results: the press release was earlier
         await b.on_filing(entry("F3", ["5.07"]), "ACME")               # result of a vote: a formality
         await b.on_filing(entry("F4", ["9.01"]), "ACME")
-        b.cfg["edgar"]["trade"] = True                                 # only then is a filing traded
+        b.cfg["edgar"]["trade"] = True                                 # the switch on (as since 24.11.): traded
         await b.on_filing(entry("F5", ["8.01"]), "ACME")
         b.cfg["edgar"]["rate"] = False
         await b.on_filing(entry("F6", ["8.01"]), "ACME")
@@ -3012,17 +3052,35 @@ def test_wirealpha_releases_are_listed_with_their_wire_and_the_key_never_reaches
            w.take(msg(data("u8", ["BETA"], at="2026-11-24T14:00:00Z"))),                      # replayed after connecting: old
            w.take({"type": "insight", "data": {}}), w.take("pong")]
     assert [g["id"] if g else None for g in got] == ["wa-globenewswire:u1", None, None, None, None, None]
+    # the stream carries the headline only: whoever rates the release asks for its text, and does without if need be
+
+    class Resp:
+        def __init__(self, status, data): self.status_code, self.data = status, data
+        def json(self): return self.data
+
+    class Http:
+        answers, asked = [Resp(200, {"data": {"body": "<p>Acme will pay $42 a share.</p><script>x()</script>"}}),
+                          Resp(404, {}), Resp(200, ["unexpected"])], []
+        async def get(self, url, headers=None):
+            self.asked.append((url, headers["Authorization"]))
+            return self.answers.pop(0)
+    w.http = Http()
+    assert got[0]["text_optional"] is True and "text" not in got[0]
+    assert [await_none(got[0]["fetch"]()) for _ in range(3)] == ["Acme will pay $42 a share.", "", ""]
+    assert w.http.asked[0] == ("https://api.wirealpha.com/v1/articles/u1", "Bearer wa_live_SECRETKEY")
+    with_text = w.take(msg({**data("u9", ["ACME"]), "body": "The text came with the message."}))
+    assert with_text["text"] == "The text came with the message." and "fetch" not in with_text
     w._error(RuntimeError("handshake failed for wss://api.wirealpha.com/v1/ws?apiKey=wa_live_SECRETKEY"))
     long_key = WireAlpha({"enabled": True, "sources": []}, "wa_live_" + "K" * 180, Uni(), None, j)
     long_key._error(ValueError("x" * 150 + " wss://api.wirealpha.com/v1/ws?apiKey=wa_live_" + "K" * 180))   # cut only after masking
     rows = list(j.recent_events(1))
     items = [r for r in rows if r["kind"] == "wire_item"]
     assert [(r["source"], r["symbol"], r.get("alert"), r["latency_ms"]) for r in items] == [
-        ("wa-globenewswire", "ACME", None, 420), ("wa-globenewswire", "BETA", True, 420)]
-    assert len([r for r in rows if r["kind"] == "wirealpha_sample"]) == 4                     # as received, for a check of the format
+        ("wa-globenewswire", "ACME", None, 420), ("wa-globenewswire", "BETA", True, 420), ("wa-globenewswire", "ACME", None, 420)]
+    assert len([r for r in rows if r["kind"] == "wirealpha_sample"]) == 5                     # as received, for a check of the format
     assert "SECRETKEY" not in json.dumps(rows) and "***" in next(r for r in rows if r["kind"] == "error")["error"]
     assert "KKKK" not in json.dumps(rows) and len([r for r in rows if r["kind"] == "error"]) == 2
-    assert w.stats == {"messages": 0, "items": 4, "matched": 2, "errors": 1}
+    assert w.stats == {"messages": 0, "items": 5, "matched": 3, "errors": 1}
 
 
 def test_a_wirealpha_connection_that_fails_at_once_is_tried_ever_more_rarely(tmp_path, monkeypatch):

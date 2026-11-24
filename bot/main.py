@@ -87,7 +87,7 @@ class Bot:
         # Filings with the SEC: every one is logged (measurement); a fresh one is also read and rated.
         self.edgar = Edgar(self.cfg["edgar"], env("SEC_CONTACT", ""), self.universe, self.journal,
                            on_filing=self.on_filing)
-        # One more source of press releases, measured only until it is named in [wires] trade.
+        # Press releases by push. Its wires are traded if named in [wires] trade, otherwise only measured.
         self.wirealpha = WireAlpha(self.cfg.get("wirealpha"), env("WIREALPHA_API_KEY", ""), self.universe,
                                    self.on_wire, self.journal, self.cfg["wires"]["max_age_s"], is_alert=is_alert)
         self.speed = Speed(self.api, self.cfg["speed"], self.journal, self.universe, self.news.stock_stats)
@@ -123,8 +123,8 @@ class Bot:
         await self.news.on_article(art)
 
     async def on_filing(self, entry: dict, sym: str):
-        """A fresh filing with the SEC: read and rated like a press release. It is traded only with
-        [edgar] trade; until then every rating is logged, to measure how often it is right."""
+        """A fresh filing with the SEC: read, rated and traded like a press release. Without
+        [edgar] trade it is only rated, to measure how often the rating is right."""
         cfg = self.cfg["edgar"]
         items = set(entry["items"])
         if not cfg.get("rate") or items & set(cfg.get("skip_with_items") or []) \

@@ -1,11 +1,15 @@
-"""Press releases from WireAlpha, as one more source to measure.
+"""Press releases from WireAlpha, by push.
 
 WireAlpha (wirealpha.com) offers a free stream of press releases from several wires and says it
 delivers them within a second. Nothing independent confirms that, the service is young, and its
-terms let it end at any time. So it is measured, not traded: every release that belongs to one
-tradable stock is logged as `wire_item` with the source "wa-<wire>" (for example wa-businesswire),
-and the comparison with the other sources (`news_dup`, weekly statistics "Nachrichtenquellen")
-shows whether it really is first. It is traded only once it is named in `[wires] trade`.
+terms let it end at any time. Every release that belongs to one tradable stock is logged as
+`wire_item` with the source "wa-<wire>" (for example wa-businesswire), and the comparison with the
+other sources (`news_dup`, weekly statistics "Nachrichtenquellen") shows whether it really is
+first. A source is rated and traded if it is named in `[wires] trade` (Josh's decision of
+24.11.2026: trade at once, no measuring first), otherwise only measured.
+
+The stream carries the headline only. For a release that is rated, the full text is asked for over
+the ordinary interface (`body`); if that fails, the headline is rated by itself.
 
 The key comes from the environment (WIREALPHA_API_KEY) and is stored only on the server. It is
 part of the stream's address, so no address is ever logged.
@@ -19,11 +23,16 @@ import asyncio
 import json
 import time
 
+import html
+import re
+
+import httpx
 import websockets
 
 from .common import iso, log, now, parse_ts, spawn
 
 STREAM = "wss://api.wirealpha.com/v1/ws"
+ARTICLE = "https://api.wirealpha.com/v1/articles/"
 SAMPLES = 5      # the first messages of a day are logged as they came, to check the format against the documentation
 HELD_S = 120     # a connection that lasted this long was a working one
 
@@ -63,6 +72,7 @@ class WireAlpha:
         self.cfg, self.key, self.universe = cfg or {}, (key or "").strip(), universe
         self.on_article, self.journal, self.max_age_s, self.is_alert = on_article, journal, max_age_s, is_alert
         self.sources = {s.lower() for s in self.cfg.get("sources") or []}
+        self.http = httpx.AsyncClient(timeout=self.cfg.get("text_timeout_s", 3))
         self.seen = set()
         self.connected = False
         self.samples = 0
@@ -103,7 +113,27 @@ class WireAlpha:
                            headline=art["headline"][:140], source=art["source"], company="",
                            sent=msg.get("timestamp"), latency_ms=data.get("latency_ms"),
                            **({"alert": True} if alert else {}))
-        return None if alert else art
+        if alert:
+            return None
+        if not art.get("text"):
+            # The stream carries the headline only. Whoever rates the release asks for its text;
+            # without it the headline still counts (it is the release's own, not a filing's label).
+            art["fetch"], art["text_optional"] = (lambda i=data["id"]: self.body(i)), True
+        return art
+
+    async def body(self, article_id) -> str:
+        """The full text of one release; empty if it cannot be had in time. Never raises."""
+        try:
+            r = await self.http.get(ARTICLE + str(article_id), headers={"Authorization": f"Bearer {self.key}"})
+            if r.status_code != 200:
+                return ""
+            d = r.json()
+            d = d.get("data", d) if isinstance(d, dict) else {}
+            text = d.get("body") if isinstance(d, dict) else ""
+            text = re.sub(r"<(script|style)\b.*?</\1>", " ", str(text or ""), flags=re.S | re.I)
+            return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", text))).strip()[:12000]
+        except Exception:
+            return ""
 
     def _error(self, e):
         self.stats["errors"] += 1

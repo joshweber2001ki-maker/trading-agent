@@ -23,8 +23,8 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/executor.py` | Positionsgröße, Risikogrenzen, Order mit Stop und Ziel, Zeitlimit, Glattstellen. Vor und nach der Börse (`[extended]`): nur Limit-Orders; Stop und Zeitlimit überwacht der Bot selbst, am Kurs, mit dem der Broker die offene Position bewertet. `probe`: Geld- und Briefkurs feststellen, indem 1 Aktie hin und zurück gehandelt wird |
 | `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API. Ein Modell entscheidet (`[llm] model`), weitere bewerten zum Vergleich mit (`shadow`); jedes Modell braucht eine eigene Form der Anfrage |
 | `bot/wires.py` | Pressemitteilungen von PR Newswire und Business Wire (seit 23.11.; GlobeNewswire ist eingebaut, weist den Server aber ab: 403), je Verteiler die Zuordnung zum Börsenkürzel; Haupt-Feeds alle 10 s, Themen-Feeds jede Minute (`[wires]`). Anlegeraufrufe von Kanzleien werden erkannt (`is_alert`), mit `alert` protokolliert und weder bewertet noch gemessen |
-| `bot/edgar.py` | Pflichtmitteilungen an die SEC (Formular 8-K): die Liste alle 2 Sekunden (`[edgar] fast_poll_s`, werktags 6:00 bis 17:40 Uhr New Yorker Zeit), jede Meldung mit Annahmezeit protokolliert. Frische Meldungen ohne Quartalszahlen gehen mit ihrem Text und dem der Anlage 99 an den Sofort-Einstieg: bewertet (`rate`), aber nicht gehandelt, solange `trade = false` |
-| `bot/wirealpha.py` | Pressemitteilungen von WireAlpha (kostenlose Push-Verbindung, vom Anbieter „unter einer Sekunde“, ungeprüft): nur gemessen (`wire_item` mit Quelle `wa-<verteiler>`); läuft nur mit Schlüssel auf dem Server (`[wirealpha]`) |
+| `bot/edgar.py` | Pflichtmitteilungen an die SEC (Formular 8-K): die Liste alle 2 Sekunden (`[edgar] fast_poll_s`, werktags 6:00 bis 17:40 Uhr New Yorker Zeit), jede Meldung mit Annahmezeit protokolliert. Frische Meldungen ohne Quartalszahlen gehen mit ihrem Text und dem der Anlage 99 an den Sofort-Einstieg: bewertet (`rate`) und gehandelt (`trade`) |
+| `bot/wirealpha.py` | Pressemitteilungen von WireAlpha (kostenlose Push-Verbindung, vom Anbieter „unter einer Sekunde“, ungeprüft), Quelle `wa-<verteiler>`. Die vier Verteiler werden gehandelt (`[wires] trade`), den vollen Text holt der Bot je Meldung nach; die SEC-Meldungen von WireAlpha werden nur gemessen. Läuft nur mit Schlüssel auf dem Server (`[wirealpha]`) |
 | `bot/finnhub_news.py` | Nachrichten von Finnhub (kostenloses Konto); abgeschaltet seit 24.11.2026 (kam 13 bis 14 Minuten nach der Veröffentlichung, nie zuerst) |
 | `bot/first.py` | dieselbe Nachricht aus mehreren Quellen: nur die erste wird bewertet und gehandelt, jede spätere Kopie protokolliert (`news_dup`, mit Verspätung) |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
@@ -112,22 +112,30 @@ und man muss den Text lesen, um die Richtung zu erkennen (Zahlen: `memory/strate
 - Vor und nach der Börse zählen Stop und Ziel ab dem Ausführungskurs und der Bot überwacht sie am Kurs,
   mit dem der Broker die Position bewertet. In der Handelszeit liegen Stop und Ziel als Orders beim Broker,
   gerechnet ab dem gesehenen Brief- oder Geldkurs.
-- **Quellen, die handeln:** PR Newswire (im Median 98 Sekunden zu spät) und Business Wire (342 Sekunden);
-  GlobeNewswire weist den Server ab (403), nicht umgehen. Kommt dieselbe Nachricht mehrfach, zählt die erste.
+- **Alles handelt sofort, nichts wird erst gemessen** (Entscheidung Josh 24.11.2026, „ist ja Paper-Trading“).
+- **Pressemitteilungen:** PR Newswire (im Median 98 Sekunden zu spät) und Business Wire (rund 340 Sekunden)
+  über ihre Feeds; GlobeNewswire weist den Server ab (403), nicht umgehen. Dazu WireAlpha per Push
+  (PR Newswire, Business Wire, GlobeNewswire, AccessWire), sobald Josh den Schlüssel eingetragen hat;
+  ungeprüft ist, ob es wirklich in unter einer Sekunde liefert und wie gut seine Zuordnung zum Börsenkürzel
+  ist. Kommt dieselbe Nachricht mehrfach, zählt die erste.
 - **SEC-Pflichtmitteilungen:** Die Liste wird alle 2 Sekunden abgefragt; der Bot sieht eine Meldung damit
   rund 35 bis 60 Sekunden nach der Annahme statt nach fünf Minuten. Frische Meldungen (höchstens 10 Minuten
-  alt, ohne Quartalszahlen, keine bloße Formalie) werden gelesen und bewertet (`fast_rated` mit Quelle `sec`).
-  **Gehandelt werden sie noch nicht** (`[edgar] trade = false`, jeder Kandidat endet als `fast_rejected`
-  mit `source_off`): Ob gleich gehandelt oder erst zwei Wochen gemessen wird, hat Josh noch nicht entschieden.
-  Die SEC veröffentlicht nach 17:30 Uhr New Yorker Zeit Angenommenes erst um 6:00 Uhr am nächsten Morgen.
-- **Nur gemessen:** WireAlpha (sobald Josh den Schlüssel eingetragen hat). Haiku und Sonnet bewerten jede
-  Meldung des Sofort-Einstiegs mit (`fast_shadow`), ohne Einfluss auf den Handel.
+  alt, ohne Quartalszahlen, keine bloße Formalie) werden gelesen, bewertet und gehandelt (`fast_rated` mit
+  Quelle `sec`; `[edgar] trade = false` würde nur bewerten). Die SEC veröffentlicht nach 17:30 Uhr New Yorker
+  Zeit Angenommenes erst um 6:00 Uhr am nächsten Morgen.
+- **Vorwissen für die KI:** zu jeder Meldung, was der Bot in den letzten drei Tagen schon von derselben Firma
+  gesehen hat (eine Pflichtmitteilung wiederholt oft eine Pressemitteilung), bei Pflichtmitteilungen der
+  Hinweis darauf, bei Berichten die Erwartungen der Analysten.
+- **Nur zum Vergleich:** Haiku und Sonnet bewerten jede Meldung des Sofort-Einstiegs mit (`fast_shadow`),
+  ohne Einfluss auf den Handel. Die SEC-Meldungen, die WireAlpha liefert, werden nur gemessen.
 - **Abgeschaltet:** die alte Regel mit Kursbestätigung, Alpacas Nachrichtenstrom (`[news] stream = false`;
   Stunden verspätet, jede siebte Meldung zur falschen Firma) und die Finnhub-Nachrichten.
 
 **Was noch fehlt**
 - Josh legt die Konten bei WireAlpha und Alpha Vantage an und trägt die Schlüssel auf dem Server ein:
   `bash /opt/trading-agent/deploy/set-keys.sh wirealpha` und `... alphavantage`, danach die Prüfwerkzeuge.
+  WireAlpha ist am echten Dienst ungeprüft: nach dem ersten Tag `wirealpha_sample`, `wire_item` mit `wa-…`
+  und die Zuordnung zum Börsenkürzel ansehen.
 - Abendliche Prüfung jeder Ausführung gegen den echten Umsatz (das Paper-Konto prüft die Ordergröße nicht
   gegen die verfügbare Menge; die Probe mit 1 Aktie zeigt den Kurs, nicht die Tiefe).
 - Dossier über die Erwartungen hinaus (Alpha Vantage: nächstes Quartal und Jahr; erwartete Bewegung aus
@@ -163,7 +171,7 @@ aus (`tools/weekly_stats.py`, „mitbewertet von …“). Welches Modell entsche
 - `logs/trades.jsonl` – ein Eintrag je abgeschlossenem Trade
 - `logs/events-JJJJ-MM-TT.jsonl` – alle Entscheidungen: jede zugeordnete Pressemitteilung mit
   Veröffentlichungszeit (`wire_item`; `alert: true` = Anlegeraufruf einer Kanzlei, weder bewertet noch
-  gemessen; Quelle `wa-…` = über WireAlpha, nur gemessen), jede SEC-Meldung mit Annahmezeit (`sec_item`), der
+  gemessen; Quelle `wa-…` = über WireAlpha), jede SEC-Meldung mit Annahmezeit (`sec_item`), der
   Kursverlauf im Sekundentakt danach (`news_speed`) und im Detail für die Nachrechnung von
   Einstiegen (`news_path`), bewertete Meldungen (`news_classified`, mit
   `model` = das Modell, dessen Bewertung zählt), die Bewertungen der mitlaufenden Modelle
@@ -174,11 +182,11 @@ aus (`tools/weekly_stats.py`, „mitbewertet von …“). Welches Modell entsche
   Sitzungsende (`session_end`); alle fünf Minuten, wie viel die Kursquelle zeigt (`feed_view`:
   je Gruppe `n` Aktien, davon `seeing` mit brauchbarem Kurs); vom Sofort-Einstieg jede Bewertung
   (`fast_rated`, auch ohne Trade; `source: sec` = Pflichtmitteilung, `article` ist dann ihre
-  Zugangsnummer; mit `news_speed` derselben Meldung zeigt sich, ob die Richtung stimmte), die Bewertung
+  Zugangsnummer; `seen_before` = die KI bekam frühere Meldungen derselben Firma als Vorwissen; mit `news_speed` derselben Meldung zeigt sich, ob die Richtung stimmte), die Bewertung
   derselben Meldung durch die mitlaufenden Modelle (`fast_shadow`), nicht bewertete Meldungen mit Grund
   (`fast_skipped`; `no_text` = Text der Pflichtmitteilung nicht abrufbar), Kandidaten ohne Einstieg mit Grund
   (`fast_rejected`: `too_old`, `no_reference`, `max_open_strategy`, `entry_refused`; `source_off` = Quelle
-  wird nur bewertet, nicht gehandelt; `session_window` = erste 5 oder letzte 30 Minuten der Handelszeit;
+  wird nur bewertet, nicht gehandelt (seit 24.11. keine mehr); `session_window` = erste 5 oder letzte 30 Minuten der Handelszeit;
   `session` = Sitzung endete während der Bewertung; `stray_share` = von einer Probe ist in dieser Aktie
   etwas liegen geblieben, siehe `error` mit `where: probe_leftover`;
   aus dem Blick auf den Markt, mit `how` = `feed` oder `probe` und den gesehenen Kursen: `spread`,

@@ -9,8 +9,9 @@ state. Then the live stream for SECONDS (default 90): how many messages arrive, 
 sources, with which tickers, and how many seconds after their time of publication. The first
 messages are printed as they came, to check the format against the documentation.
 
-The bot itself only measures WireAlpha (`wire_item` with source "wa-<wire>"); whether it is
-really earlier than the wires' own feeds shows in the weekly statistics. The key is never printed.
+The bot logs every release (`wire_item` with source "wa-<wire>") and trades the wires named in
+`[wires] trade`; whether WireAlpha is really earlier than the wires' own feeds shows in the weekly
+statistics. The key is never printed.
 """
 import asyncio
 import json

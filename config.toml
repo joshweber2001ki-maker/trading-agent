@@ -180,7 +180,10 @@ fast_poll_s = 10    # der Haupt-Feed jedes Verteilers (jeweils der erste in der 
 poll_s      = 60    # die Themen-Feeds
 max_age_s   = 420   # so alt darf eine Pressemitteilung für einen Trade höchstens sein
 same_news_min = 15  # gleiche Aktie, ähnliche Überschrift oder beides Ergebnisse binnen 15 Minuten = dieselbe Nachricht
-trade = ["prnewswire", "businesswire", "globenewswire"]   # diese Verteiler werden bewertet und gehandelt; fehlt einer, wird er nur gemessen
+# Diese Quellen werden bewertet und gehandelt; fehlt eine, wird sie nur gemessen. "wa-..." = dieselben
+# Verteiler über WireAlpha (Entscheidung Josh 24.11.2026: gleich handeln, nicht erst messen).
+trade = ["prnewswire", "businesswire", "globenewswire",
+         "wa-prnewswire", "wa-businesswire", "wa-globenewswire", "wa-accesswire"]
 # PR Newswire
 feeds = [
   "https://www.prnewswire.com/rss/news-releases-list.rss",
@@ -218,13 +221,16 @@ max_companies  = 40
 
 [wirealpha]
 # Pressemitteilungen von WireAlpha (kostenlos, verspricht Zustellung in unter einer Sekunde; ungeprüft,
-# junger Anbieter). Nur messen: Jede Meldung steht als wire_item mit der Quelle "wa-<verteiler>" im
-# Protokoll; ob sie wirklich früher kommt als die Feeds der Verteiler, zeigt die Wochenstatistik
-# ("Nachrichtenquellen"). Gehandelt wird eine Quelle erst, wenn sie in [wires] trade steht.
+# junger Anbieter). Jede Meldung steht als wire_item mit der Quelle "wa-<verteiler>" im Protokoll; ob
+# sie wirklich früher kommt als die Feeds der Verteiler, zeigt die Wochenstatistik ("Nachrichtenquellen").
+# Bewertet und gehandelt wird, was in [wires] trade steht: seit 24.11.2026 die vier Verteiler (Entscheidung
+# Josh: gleich handeln). Kommt dieselbe Meldung auch über den Feed des Verteilers, zählt die erste.
 # Läuft nur mit Schlüssel auf dem Server: bash deploy/set-keys.sh wirealpha
 enabled = true
 sources = ["prnewswire", "businesswire", "globenewswire", "accesswire", "sec_edgar"]
-          # sec_edgar: Pflichtmitteilungen, wie WireAlpha sie meldet; zeigt, ob es sie früher sieht als der Bot selbst
+          # sec_edgar: Pflichtmitteilungen, wie WireAlpha sie meldet. Nur gemessen (zeigt, ob WireAlpha sie
+          # früher sieht als der Bot selbst); gehandelt werden Pflichtmitteilungen über die Liste der SEC ([edgar])
+text_timeout_s = 3   # so lange auf den vollen Text einer Meldung warten; sonst wird die Überschrift allein bewertet
 
 [edgar]
 # Pflichtmitteilungen an die US-Börsenaufsicht SEC (Formular 8-K). Jede wird mitgeschrieben (Messung).
@@ -240,7 +246,8 @@ fast_poll_s = 2      # dazwischen nur die neuesten Meldungen, so oft (Limit der 
                      # nur von 6:00 bis 17:40 Uhr New Yorker Zeit, danach veröffentlicht die SEC erst am nächsten Morgen
 fast_count  = 40     # so viele Meldungen je schneller Abfrage
 rate        = true   # frische Meldungen lesen und bewerten (fast_rated mit source "sec")
-trade       = false  # ... und handeln. Aus, bis Josh es freigibt: bis dahin wird nur bewertet und gemessen
+trade       = true   # ... und handeln (Entscheidung Josh 24.11.2026: gleich handeln, nicht erst messen).
+                     # false = nur bewerten; ein Kandidat steht dann als fast_rejected mit dem Grund source_off im Protokoll
 skip_items  = ["5.03", "5.07", "9.01"]   # Meldungen, die NUR solche Punkte haben, werden nicht bewertet
                      # (Satzungsänderung, Abstimmungsergebnis der Hauptversammlung, bloße Anlagen)
 skip_with_items = ["2.02"]   # Meldungen MIT einem dieser Punkte werden nicht bewertet: Quartalszahlen.
@@ -254,7 +261,7 @@ enabled         = true
 after_close_min = 25
 lookback_days   = 5      # so weit zurück werden noch nicht gemessene Meldungen nachgeholt
 max_events      = 1500   # höchstens so viele Meldungen pro Lauf
-secondary       = ["wa-", "finnhub"]   # Quellen, die nur gemessen werden: Ihre Meldung zählt nur, wo kein Verteiler
+secondary       = ["wa-", "finnhub"]   # Quellen, die Meldungen anderer wiederholen: Ihre Meldung zählt nur, wo kein Verteiler
                          # dieselbe Aktie in derselben Minute meldet (sonst würde dieselbe Meldung doppelt gemessen)
 detail          = true   # zu jeder Meldung in einer gehandelten Aktie den Verlauf genauer festhalten (alle 5 Sekunden
                          # über 5 Minuten, jede Minute bis 30 Minuten, Geld- und Briefkurs kurz danach), um später

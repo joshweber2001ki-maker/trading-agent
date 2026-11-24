@@ -603,16 +603,25 @@ gesamten Markt eng. Eine weite sagt nichts, deshalb entscheidet dann die Probe.
   werden Meldungen mit Quartalszahlen (Punkt 2.02: Die Pressemitteilung war in 16 von 17 Fällen früher da)
   und reine Formalien (nur 5.03, 5.07 oder 9.01). Die KI bekommt als Vorwissen den Hinweis, dass ein 8-K
   bis zu vier Werktage nach dem Ereignis kommen darf und oft eine ältere Pressemitteilung wiederholt.
-  **Gehandelt wird diese Quelle noch nicht** (`[edgar] trade = false`): Jede Bewertung wird protokolliert,
-  ein Kandidat endet als `fast_rejected` mit dem Grund `source_off`. Josh hat die Frage „gleich handeln
-  oder erst zwei Wochen messen“ noch nicht beantwortet. Nach 17:30 Uhr New Yorker Zeit Angenommenes
-  veröffentlicht die SEC erst um 6:00 Uhr am nächsten Morgen; dafür ist der Bot blind.
-- **WireAlpha (neu, nur gemessen).** Kostenlose Push-Verbindung für Pressemitteilungen von vier Verteilern
-  und SEC-Meldungen, laut Anbieter in unter einer Sekunde. Unabhängig bestätigt ist das nicht, der
+  **Gehandelt wird diese Quelle von Anfang an** (`[edgar] trade = true`). Josh am 24.11. auf die Frage
+  „gleich handeln oder erst zwei Wochen messen“: „alles direkt handeln, kein voriges Messen, ist ja
+  Paper-Trading“. Nach 17:30 Uhr New Yorker Zeit Angenommenes veröffentlicht die SEC erst um 6:00 Uhr am
+  nächsten Morgen; dafür ist der Bot blind.
+- **WireAlpha (neu, handelt ebenfalls sofort).** Kostenlose Push-Verbindung für Pressemitteilungen von vier
+  Verteilern und SEC-Meldungen, laut Anbieter in unter einer Sekunde. Unabhängig bestätigt ist das nicht, der
   Anbieter ist jung und kann den Dienst jederzeit beenden. Der Bot schreibt jede Meldung mit der Quelle
-  `wa-<verteiler>` mit; `news_dup` und die Wochenstatistik zeigen, ob sie früher kommt als die Feeds der
-  Verteiler. Gehandelt wird sie erst, wenn die Messung das zeigt und Josh zustimmt. Läuft erst, wenn Josh
-  den Schlüssel auf dem Server eingetragen hat.
+  `wa-<verteiler>` mit. Die vier Verteiler (PR Newswire, Business Wire, GlobeNewswire, AccessWire) werden
+  nach derselben Entscheidung bewertet und gehandelt (`[wires] trade`); die Verbindung liefert nur die
+  Überschrift, den vollen Text holt der Bot je Meldung nach (höchstens 3 Sekunden, sonst zählt die
+  Überschrift allein). Die SEC-Meldungen von WireAlpha werden nur gemessen, weil der Bot sie selbst von
+  der SEC holt. Am echten Dienst geprüft ist nichts davon: Format und Zuordnung zum Börsenkürzel stammen
+  aus der Dokumentation; die ersten fünf Nachrichten jedes Tages stehen im Wortlaut im Protokoll
+  (`wirealpha_sample`). Läuft erst, wenn Josh den Schlüssel auf dem Server eingetragen hat.
+- **Vorwissen: was der Bot von der Firma schon gesehen hat.** Zu jeder Meldung bekommt die KI die
+  Überschriften der Meldungen derselben Firma aus den letzten 72 Stunden (höchstens fünf) mit dem Hinweis,
+  dass eine Wiederholung nicht neu ist. Grund: Eine Pflichtmitteilung folgt oft Minuten bis Tage auf die
+  Pressemitteilung zum selben Ereignis, und die Überschriften sind zu verschieden für die Doppel-Erkennung.
+  Nach einem Neustart beginnt dieses Gedächtnis leer.
 - **Anlegeraufrufe von Kanzleien** („INVESTOR ALERT“, „class action“, „lead plaintiff“) werden erkannt
   und weder bewertet noch gemessen: 164 von 789 Überschriften in den Protokollen bis 24.11., keine davon
   eine Meldung der Firma. Eine Firma, die über ihren eigenen Prozess berichtet (Vergleich, Urteil), bleibt.
@@ -630,8 +639,8 @@ die Spanne auf 1 Aktie, also Cent-Beträge; sie steht nicht in `trades.jsonl`, a
 
 **Erwartung.** Ein bis zwei handelbare Fälle am Tag mit enger Spanne, nicht viele. Ob die KI die Richtung
 oft genug trifft, ist offen (bis 24.11.: 26 Bewertungen mit Richtung, 10 davon gemessen, 5 richtig,
-1 falsch, 4 ohne Bewegung). Die Wochenstatistik trennt deshalb nach Pressemitteilung und SEC-Meldung und
-nach Art der Meldung. Maßstab aus der dritten Auswertung: Vor und nach der Börse muss die Richtung in etwa
+1 falsch, 4 ohne Bewegung). Weil nichts erst gemessen wird, zeigt sich das an den Trades selbst; die
+Wochenstatistik trennt nach Pressemitteilung und SEC-Meldung und nach Art der Meldung. Maßstab aus der dritten Auswertung: Vor und nach der Börse muss die Richtung in etwa
 zwei von drei Fällen stimmen, in der Handelszeit in jedem zweiten.
 
 **Offener Punkt für Josh (nicht umgesetzt, wäre eine neue Regel):** Der engste Stop liegt bei 0,45 % (kleine
@@ -648,6 +657,8 @@ Hälfte seiner Meldungen wird deshalb gar nicht bewertet (`fast_skipped`, `stale
 - der Sofort-Einstieg in der Handelszeit mit Stop und Ziel beim Broker;
 - der Abruf des Textes der Pflichtmitteilungen (`fast_skipped` mit `no_text` zeigt, wo er fehlt) und wie
   schnell die Liste wirklich ist (Wochenstatistik, Quelle `sec`);
+- WireAlpha: ob die Nachrichten so aussehen wie dokumentiert (`wirealpha_sample`), ob die Börsenkürzel
+  stimmen und ob der volle Text ankommt (`fast_rated` mit `with_text`);
 - weiter offen aus der ersten Fassung: Ziel-Order und ihr Streichen, Ausstieg bei Stop und Zeitlimit.
 
 **Was folgt** (Rest der Stufe 0, noch nicht gebaut): abendliche Prüfung jeder Ausführung gegen den echten
@@ -751,8 +762,10 @@ zweiter Weg zu den SEC-Meldungen. Stufe 1 (Interactive Brokers als Datenquelle, 
   jedem Einstieg (Kursquelle oder Probe mit 1 Aktie), Einstieg nur bei einer Spanne bis 0,5 %;
   Sofort-Einstieg auch in der Handelszeit, die alte Regel mit Kursbestätigung und Alpacas Nachrichtenstrom
   sind abgeschaltet. SEC-Liste alle 2 Sekunden, frische Pflichtmitteilungen ohne Quartalszahlen werden
-  gelesen und bewertet, aber noch nicht gehandelt (Joshs Entscheidung dazu steht aus). WireAlpha als
-  gemessene Quelle und Ablage für die Schlüssel von WireAlpha und Alpha Vantage (`deploy/set-keys.sh`).
+  gelesen, bewertet und gehandelt; WireAlpha als weitere Quelle, die ebenfalls handelt, sobald der
+  Schlüssel da ist (Josh am selben Tag: „alles direkt handeln, kein voriges Messen“). Ablage für die
+  Schlüssel von WireAlpha und Alpha Vantage (`deploy/set-keys.sh`). Die KI bekommt als Vorwissen, was der
+  Bot von derselben Firma schon gesehen hat.
   Kanzlei-Aufrufe werden nicht mehr bewertet. Haiku und Sonnet bewerten beim Sofort-Einstieg mit.
   Finnhub-Nachrichten aus. RTPR ist verworfen: Seine Bedingungen verbieten die Nutzung in einem Handels-Bot.
   Einzelheiten im Abschnitt „Zweite Fassung im Handel“.

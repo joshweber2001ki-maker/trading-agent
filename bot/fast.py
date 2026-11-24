@@ -31,6 +31,8 @@ from .llm import is_noise
 from .news_strategy import trade_plan, vol_factor
 
 FREE_DELAY_MIN = 16     # whole-market prices are free once they are 15 minutes old
+EARLIER_H = 72          # how long an announcement is remembered as "seen before" for the same stock
+EARLIER_KEEP = 5        # at most this many per stock
 
 
 class FastStrategy:
@@ -44,6 +46,7 @@ class FastStrategy:
         self.shadows = [c for c in shadows if c.model != classifier.model] if self.cfg.get("shadows") else []
         self.seen = set()          # article ids and (symbol, headline) pairs already handled
         self.entering = set()      # stocks for which an entry is being decided this moment
+        self.earlier = {}          # stock -> the announcements seen of it lately: (published, source, headline)
         self.sem = asyncio.Semaphore(4)
         self.stats = {"received": 0, "rated": 0, "candidates": 0, "entered": 0}
 
@@ -51,6 +54,20 @@ class FastStrategy:
         if len(self.seen) > 20000:
             self.seen.clear()
         self.stats = {k: 0 for k in self.stats}
+        cut = now() - timedelta(hours=EARLIER_H)
+        self.earlier = {s: xs for s, xs in ((s, [x for x in xs if x[0] >= cut]) for s, xs in self.earlier.items()) if xs}
+
+    def seen_before(self, sym, published, source, head):
+        """What the bot has already seen of this company in the last days, as a note for the rating.
+        A filing often repeats a press release, a second wire the first one: the reader should know."""
+        cut = now() - timedelta(hours=EARLIER_H)
+        before = [x for x in self.earlier.get(sym, []) if x[0] >= cut]
+        self.earlier[sym] = (before + [(published, source, head[:140])])[-EARLIER_KEEP:]
+        if not before:
+            return None
+        lines = "\n".join(f"- {iso(t)} ({src}): {h}" for t, src, h in reversed(before))
+        return ("Announcements of this company that the system has already seen (newest first):\n" + lines
+                + "\nIf the item below reports the same thing as one of them, it is not new.")
 
     async def on_article(self, art: dict):
         try:
@@ -151,6 +168,7 @@ class FastStrategy:
         age = max(0.0, (received - published).total_seconds())
         base = dict(article=aid, source=art.get("source"), symbol=sym, headline=head[:140], phase=phase,
                     age_s=round(age))
+        before = self.seen_before(sym, published, art.get("source"), head)
 
         def skip(reason, **kw):
             self.journal.event("fast_skipped", reason=reason, **base, **kw)
@@ -171,20 +189,21 @@ class FastStrategy:
         if st["dollar_volume"] < cfg["min_dollar_volume"]:
             return skip("too_small", dollar_volume=st["dollar_volume"])
 
-        article = {k: v for k, v in art.items() if k not in ("fetch", "note", "rate_only", "dedupe_key")}
+        article = {k: v for k, v in art.items() if k not in ("fetch", "note", "rate_only", "dedupe_key", "text_optional")}
         if not article.get("text"):
             if art.get("fetch"):
-                # A source whose headline says nothing by itself (a filing): without its text there is nothing to rate.
                 article["text"] = await art["fetch"]() or ""
-                if not article["text"]:
+                # A source whose headline says nothing by itself (a filing): without its text there is nothing to rate.
+                if not article["text"] and not art.get("text_optional"):
                     return skip("no_text")
             elif cfg.get("fetch_text") and self.fetch_text and art.get("url"):
                 text = await self.fetch_text(art["url"])
                 if text:
                     article["text"] = text
         expected = await self.expectations.context(sym) if self.expectations else None
-        # What the reader should know beforehand: what kind of source this is, and what analysts expect.
-        context = "\n".join(x for x in (art.get("note"), expected) if x) or None
+        # What the reader should know beforehand: what kind of source this is, what the bot has
+        # already seen of the company, and what analysts expect.
+        context = "\n".join(x for x in (art.get("note"), before, expected) if x) or None
         names = {sym: await self.universe.name(sym)}
         for clf in self.shadows:
             spawn(self._shadow(clf, article, sym, names, st, context, dict(base)))
@@ -199,7 +218,8 @@ class FastStrategy:
         base.update(verdict=v, model=res["model"], model_s=res["seconds"], tokens_in=res["tokens_in"],
                     tokens_out=res["tokens_out"], size=st["size"], daily_range_pct=st["daily_range_pct"],
                     published=iso(published), rated_age_s=round(rated_age, 1),
-                    with_text=bool(article.get("text")), with_expectations=bool(expected))
+                    with_text=bool(article.get("text")), with_expectations=bool(expected),
+                    **({"seen_before": True} if before else {}))
         # Every rating is logged, traded or not: the evening's price measurement of the same
         # announcement (news_speed) then shows whether the direction was right.
         self.journal.event("fast_rated", **base)

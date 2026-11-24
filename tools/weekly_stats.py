@@ -323,8 +323,15 @@ def fast_stats(rated, speed, skipped, rejected, limits, shadows=()):
         xs = [x for x in xs if x is not None]
         return round(sum(xs) / len(xs), 2) if xs else None
 
-    path = {(r.get("src"), r.get("ref")): r for r in speed if not r.get("skipped") and r.get("r300") is not None}
-    after = lambda e: path.get((e.get("source"), e.get("article")))
+    measured = [r for r in speed if not r.get("skipped") and r.get("r300") is not None]
+    path = {(r.get("src"), r.get("ref")): r for r in measured}
+    # The same release can arrive over two sources and is measured once, under one of them: a rating
+    # of the other copy finds that path by stock and minute of publication.
+    by_minute = {}
+    for r in measured:
+        by_minute.setdefault((r.get("symbol"), (r.get("t0") or "")[:16]), r)
+    after = lambda e: path.get((e.get("source"), e.get("article"))) \
+        or by_minute.get((e.get("symbol"), (e.get("published") or "?")[:16]))
     direction = lambda e: (e.get("verdict") or {}).get("direction")
     sign = lambda e: 1 if direction(e) == "up" else -1
     # a move someone could have traded: the stock was trading before, moved, and had volume (as in the speed section)
