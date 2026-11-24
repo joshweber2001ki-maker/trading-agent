@@ -1,5 +1,5 @@
 {
- "t": "2026-11-24T05:06:45Z",
+ "t": "2026-11-24T06:06:47Z",
  "version": "893ac96cd7e22a2aff31f872ce0e7926166b5588",
  "day": "2026-11-24",
  "trading_day": true,
@@ -18,27 +18,27 @@
   "candidates": 0
  },
  "wires": {
-  "polls": 163,
-  "items": 6,
+  "polls": 1660,
+  "items": 19,
   "matched": 2,
   "errors": 0
  },
  "wire_sources": {
   "businesswire": {
-   "polls": 66,
-   "items": 0,
+   "polls": 665,
+   "items": 1,
    "matched": 0,
    "errors": 0
   },
   "prnewswire": {
-   "polls": 97,
-   "items": 6,
+   "polls": 995,
+   "items": 18,
    "matched": 2,
    "errors": 0
   },
   "finnhub": {
-   "polls": 167,
-   "items": 6,
+   "polls": 1673,
+   "items": 8,
    "matched": 0,
    "errors": 0
   }
