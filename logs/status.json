@@ -1,69 +1,77 @@
 {
- "t": "2026-11-24T21:06:25Z",
- "version": "893ac96cd7e22a2aff31f872ce0e7926166b5588",
+ "t": "2026-11-24T22:06:33Z",
+ "version": "5976c0bf84abe52e5db98c835e5ae6dd69b4aa93",
  "day": "2026-11-24",
  "trading_day": true,
  "market_open": false,
- "news_stream": true,
+ "news_stream": false,
  "llm_available": true,
  "llm_model": "claude-opus-5-5",
- "llm_calls_today": 272,
+ "llm_calls_today": 53,
  "llm_shadow_calls": {
-  "claude-haiku-5-5": 216,
-  "claude-sonnet-5-5": 216
+  "claude-haiku-5-5": 53,
+  "claude-sonnet-5-5": 53
  },
  "news": {
-  "received": 1358,
-  "classified": 216,
-  "candidates": 3
+  "received": 160,
+  "classified": 0,
+  "candidates": 0
  },
  "wires": {
-  "polls": 24082,
-  "items": 972,
-  "matched": 144,
+  "polls": 1488,
+  "items": 609,
+  "matched": 165,
   "errors": 0
  },
  "wire_sources": {
-  "businesswire": {
-   "polls": 9643,
-   "items": 283,
-   "matched": 54,
+  "prnewswire": {
+   "polls": 894,
+   "items": 220,
+   "matched": 75,
    "errors": 0
   },
-  "prnewswire": {
-   "polls": 14439,
-   "items": 689,
+  "businesswire": {
+   "polls": 594,
+   "items": 389,
    "matched": 90,
    "errors": 0
   },
   "finnhub": {
-   "polls": 24089,
-   "items": 303,
-   "matched": 2,
-   "errors": 3
+   "polls": 0,
+   "items": 0,
+   "matched": 0,
+   "errors": 0
+  },
+  "wirealpha": {
+   "messages": 0,
+   "items": 0,
+   "matched": 0,
+   "errors": 0,
+   "connected": false
   }
  },
  "edgar": {
-  "polls": 60,
-  "filings": 101,
-  "matched": 67,
-  "errors": 0
+  "polls": 949,
+  "filings": 161,
+  "matched": 91,
+  "errors": 54,
+  "handed_on": 90
  },
  "fast": {
-  "received": 103,
-  "rated": 56,
-  "candidates": 3,
-  "entered": 2
+  "received": 236,
+  "rated": 53,
+  "candidates": 1,
+  "entered": 1
  },
  "fast_enabled": true,
  "expectations": 204,
- "orb_stage": "idle",
+ "orb_stage": "done",
  "orb_pool": 0,
  "orb_watching": [],
  "open_trades": [],
- "trades_today": 1,
+ "trades_today": 2,
  "errors_today": 0,
- "flattened": true,
+ "flattened": false,
  "phase": "post",
  "extended": true
 }
