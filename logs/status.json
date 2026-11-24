@@ -1,5 +1,5 @@
 {
- "t": "2026-11-24T11:06:03Z",
+ "t": "2026-11-24T12:06:20Z",
  "version": "893ac96cd7e22a2aff31f872ce0e7926166b5588",
  "day": "2026-11-24",
  "trading_day": true,
@@ -7,61 +7,69 @@
  "news_stream": true,
  "llm_available": true,
  "llm_model": "claude-opus-5-5",
- "llm_calls_today": 5,
+ "llm_calls_today": 20,
  "llm_shadow_calls": {
   "claude-haiku-5-5": 0,
   "claude-sonnet-5-5": 0
  },
  "news": {
-  "received": 248,
+  "received": 308,
   "classified": 0,
   "candidates": 0
  },
  "wires": {
-  "polls": 9122,
-  "items": 157,
-  "matched": 19,
+  "polls": 10624,
+  "items": 224,
+  "matched": 40,
   "errors": 0
  },
  "wire_sources": {
   "businesswire": {
-   "polls": 3653,
-   "items": 39,
-   "matched": 5,
+   "polls": 4253,
+   "items": 59,
+   "matched": 13,
    "errors": 0
   },
   "prnewswire": {
-   "polls": 5469,
-   "items": 118,
-   "matched": 14,
+   "polls": 6371,
+   "items": 165,
+   "matched": 27,
    "errors": 0
   },
   "finnhub": {
-   "polls": 9189,
-   "items": 26,
+   "polls": 10700,
+   "items": 33,
    "matched": 0,
    "errors": 0
   }
  },
  "edgar": {
-  "polls": 0,
-  "filings": 0,
-  "matched": 0,
+  "polls": 6,
+  "filings": 22,
+  "matched": 21,
   "errors": 0
  },
  "fast": {
-  "received": 10,
-  "rated": 5,
-  "candidates": 0,
-  "entered": 0
+  "received": 31,
+  "rated": 20,
+  "candidates": 3,
+  "entered": 2
  },
  "fast_enabled": true,
  "expectations": 204,
  "orb_stage": "idle",
  "orb_pool": 0,
  "orb_watching": [],
- "open_trades": [],
- "trades_today": 0,
+ "open_trades": [
+  {
+   "symbol": "AAOI",
+   "strategy": "fast",
+   "side": "long",
+   "qty": 165,
+   "status": "open"
+  }
+ ],
+ "trades_today": 1,
  "errors_today": 0,
  "flattened": false,
  "phase": "pre",
