@@ -22,7 +22,8 @@ from .news_strategy import OUTCOME_DELAY_MIN, NewsStrategy
 from .orb_strategy import OrbStrategy
 from .speed import Speed
 from .first import FirstReport
-from .wires import Wires
+from .wirealpha import WireAlpha
+from .wires import Wires, is_alert
 
 NEWS_WS = "wss://stream.data.alpaca.markets/v1beta1/news"
 
@@ -81,9 +82,14 @@ class Bot:
         self.fast = FastStrategy(
             self.api, self.cfg, self.journal, self.session, self.universe, self.executor, self.llm,
             stats=self.news.stock_stats, expectations=self.expectations, fetch_text=self.wires.fetch_text,
+            shadows=self.shadows,
         )
-        # Measurement only, no trading: SEC filings as a list, and how fast prices react to announcements.
-        self.edgar = Edgar(self.cfg["edgar"], env("SEC_CONTACT", ""), self.universe, self.journal)
+        # Filings with the SEC: every one is logged (measurement); a fresh one is also read and rated.
+        self.edgar = Edgar(self.cfg["edgar"], env("SEC_CONTACT", ""), self.universe, self.journal,
+                           on_filing=self.on_filing)
+        # One more source of press releases, measured only until it is named in [wires] trade.
+        self.wirealpha = WireAlpha(self.cfg.get("wirealpha"), env("WIREALPHA_API_KEY", ""), self.universe,
+                                   self.on_wire, self.journal, self.cfg["wires"]["max_age_s"], is_alert=is_alert)
         self.speed = Speed(self.api, self.cfg["speed"], self.journal, self.universe, self.news.stock_stats)
         self.feedview = FeedView(self.api, self.cfg.get("feedview") or {}, self.cfg.get("extended") or {}, self.journal,
                                  self.session, self.universe, self.cfg["orb"]["static_pool"])
@@ -106,8 +112,9 @@ class Bot:
             self.version = "unknown"
 
     async def on_wire(self, art: dict):
-        """A press release from the wire: the fast strategy takes it before the open and after the
-        close, the old one during the regular session. Each decides by itself whether it is its turn."""
+        """A press release from a wire: the immediate entry takes it in every session it is switched
+        on for, the old rule with price confirmation during the regular session if it still is on.
+        Each decides by itself whether it is its turn."""
         trade = self.cfg["wires"].get("trade")
         traded = trade is None or art.get("source") in trade
         if not self.first.claim(art, traded) or not traded:
@@ -115,8 +122,32 @@ class Bot:
         spawn(self.fast.on_article(art))
         await self.news.on_article(art)
 
+    async def on_filing(self, entry: dict, sym: str):
+        """A fresh filing with the SEC: read and rated like a press release. It is traded only with
+        [edgar] trade; until then every rating is logged, to measure how often it is right."""
+        cfg = self.cfg["edgar"]
+        items = set(entry["items"])
+        if not cfg.get("rate") or items & set(cfg.get("skip_with_items") or []) \
+                or (items and items <= set(cfg.get("skip_items") or [])):
+            return                      # quarterly results (the press release was there minutes earlier), formalities
+        try:
+            art = self.edgar.article(entry, sym)
+            traded = bool(cfg.get("trade"))
+            if not self.first.claim(art, traded):
+                return                  # the company's press release with the same news was here first
+            if not traded:
+                art["rate_only"] = True
+            await self.fast.on_article(art)
+        except Exception as e:
+            self.errors += 1
+            self.journal.event("error", where="filing", acc=entry.get("acc"), error=repr(e)[:200])
+
     # ── loops ────────────────────────────────────────────────────────────────
     async def news_loop(self):
+        """Alpaca's news stream. Off with [news] stream = false: it arrives hours late and feeds
+        only the old rule with price confirmation."""
+        if not self.cfg["news"].get("stream", True):
+            return
         backoff = 2
         while True:
             try:
@@ -204,7 +235,10 @@ class Bot:
             "market_open": s.is_open(), "news_stream": self.ws_connected,
             "llm_available": self.llm.available, "llm_model": self.llm.model, "llm_calls_today": self.llm.day_calls,
             "llm_shadow_calls": {c.model: c.day_calls for c in self.shadows},
-            "news": self.news.stats, "wires": self.wires.stats, "wire_sources": {**self.wires.by_source, "finnhub": self.fh_news.stats}, "edgar": self.edgar.stats,
+            "news": self.news.stats, "wires": self.wires.stats,
+            "wire_sources": {**self.wires.by_source, "finnhub": self.fh_news.stats,
+                             "wirealpha": {**self.wirealpha.stats, "connected": self.wirealpha.connected}},
+            "edgar": {**self.edgar.stats, "handed_on": self.edgar.handed},
             "fast": self.fast.stats, "fast_enabled": bool(self.cfg["fast"]["enabled"]),
             "expectations": len(self.expectations.rows),
             "orb_stage": self.orb.stage, "orb_pool": len(self.orb.pool), "orb_watching": sorted(self.orb.ranges),
@@ -247,6 +281,7 @@ class Bot:
         self.orb.reset_day()
         self.wires.reset_day()
         self.fh_news.reset_day()
+        self.wirealpha.reset_day()
         self.edgar.reset_day()
         for c in [self.llm, *self.shadows]:
             c.reset_day()
@@ -264,6 +299,9 @@ class Bot:
             llm=self.llm.available, llm_model=self.llm.model, llm_shadow=[c.model for c in self.shadows],
             news=self.cfg["news"]["enabled"], orb=self.cfg["orb"]["enabled"],
             extended=bool(self.ext.get("enabled")), fast=bool(self.cfg["fast"]["enabled"]),
+            fast_sessions=self.cfg["fast"]["sessions"], look=bool((self.cfg["fast"].get("look") or {}).get("enabled")),
+            sec_rated=bool(self.cfg["edgar"].get("rate")), sec_traded=bool(self.cfg["edgar"].get("trade")),
+            wirealpha=self.wirealpha.active,
         )
         if self.cfg["fast"]["enabled"]:
             spawn(self.expectations.refresh(force=True))
@@ -319,9 +357,9 @@ class Bot:
         await self.executor.close_orphans()
         log.info("bot started; llm=%s day=%s trading_day=%s", self.llm.available, self.session.day, self.session.trading_day)
         if not self.llm.available:
-            log.warning("ANTHROPIC_API_KEY fehlt: News-Strategie inaktiv, nur Ausbruchs-Strategie läuft")
+            log.warning("ANTHROPIC_API_KEY fehlt: Meldungen werden nicht bewertet, also auch nicht gehandelt")
         await asyncio.gather(self.news_loop(), self.control_loop(), self.wires.run(), self.edgar.run(),
-                             self.fh_news.run())
+                             self.fh_news.run(), self.wirealpha.run())
 
 
 def main():

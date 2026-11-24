@@ -11,4 +11,6 @@ exec systemd-run --quiet --pipe --wait --collect \
   -p EnvironmentFile=-/etc/trading-bot/llm.env \
   -p EnvironmentFile=-/etc/trading-bot/sec.env \
   -p EnvironmentFile=-/etc/trading-bot/finnhub.env \
+  -p EnvironmentFile=-/etc/trading-bot/wirealpha.env \
+  -p EnvironmentFile=-/etc/trading-bot/alphavantage.env \
   "$APP/.venv/bin/python" "$@"

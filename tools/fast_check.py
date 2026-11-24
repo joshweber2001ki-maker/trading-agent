@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Dry run of the immediate entry on the newest real press releases. Sends NO order.
+"""Dry run of the immediate entry on the newest real announcements. Sends NO order.
 
-Run on the server:  bash deploy/run-tool.sh tools/fast_check.py [COUNT]
+Run on the server:  bash deploy/run-tool.sh tools/fast_check.py [COUNT]        press releases
+                    bash deploy/run-tool.sh tools/fast_check.py sec [COUNT]    filings with the SEC
 
-Takes the newest releases from PR Newswire that belong to a tradable stock and runs each through
-the steps the bot takes before the open and after the close: full text of the release, what
-analysts expect, the rating, the price from before the release, and the order it WOULD send.
+Takes the newest releases from PR Newswire (or the newest 8-K filings without quarterly results)
+that belong to a tradable stock and runs each through the steps the bot takes: full text, what
+analysts expect, the rating, the price from before the announcement, and the order it WOULD send.
 This shows whether every step works against the real services. The ratings cost a few cents.
+
+The look at the market before the entry (bid and offer, if need be by trading one share there and
+back) is left out here: a dry run sends no order, not even that one. The limit shown is therefore
+the widest the bot would use; the real one sits just above the offer it sees.
 """
 import asyncio
 import sys
@@ -18,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bot.alpaca import Alpaca  # noqa: E402
 from bot.common import Journal, env, load_config, now, parse_ts  # noqa: E402
+from bot.edgar import Edgar  # noqa: E402
 from bot.fast import FastStrategy  # noqa: E402
 from bot.finnhub import Expectations, Finnhub  # noqa: E402
 from bot.llm import Classifier  # noqa: E402
@@ -39,9 +45,29 @@ class NoOrders:
         return True
 
 
-async def main(count):
+async def filings(cfg, universe, journal, count):
+    """The newest filings the bot would read: of a tradable stock, not quarterly results, not a formality."""
+    edgar = Edgar(cfg["edgar"], env("SEC_CONTACT", ""), universe, journal)
+    if not edgar.contact:
+        print("Keine Kontaktadresse für die SEC auf dem Server (/etc/trading-bot/sec.env, SEC_CONTACT=...).")
+        return []
+    await edgar._load_tickers()
+    skip_with, skip_only = set(cfg["edgar"].get("skip_with_items") or []), set(cfg["edgar"].get("skip_items") or [])
+    out, seen = [], set()
+    for e in await edgar._page(0, 100):
+        sym, items = edgar.symbol_for(e["cik"]), set(e["items"])
+        if not sym or e["form"] != "8-K" or e["acc"] in seen or items & skip_with or (items and items <= skip_only):
+            continue
+        seen.add(e["acc"])
+        out.append(edgar.article(e, sym))
+    return out[:count]
+
+
+async def main(count, sec=False):
     cfg = load_config()
-    cfg["fast"] = {**cfg["fast"], "enabled": True, "max_age_s": 10 ** 9}     # old releases are fine for a dry run
+    # Old announcements are fine for a dry run; no look at the market (it could trade a share), one model.
+    cfg["fast"] = {**cfg["fast"], "enabled": True, "max_age_s": 10 ** 9, "shadows": False,
+                   "look": {**(cfg["fast"].get("look") or {}), "enabled": False}}
     api = Alpaca(env("APCA_API_KEY_ID", required=True), env("APCA_API_SECRET_KEY", required=True),
                  env("APCA_BASE_URL", "https://paper-api.alpaca.markets"), feed=env("APCA_DATA_FEED", "iex"))
     universe = Universe(api)
@@ -49,22 +75,36 @@ async def main(count):
     journal = Journal(Path(tempfile.mkdtemp(prefix="fast-check-")))
     wires = Wires(cfg["wires"], universe, None, journal)
     index, arts = NameIndex(universe.cache), {}
-    for url in cfg["wires"]["feeds"][:4]:
-        r = await wires.http.get(url)
-        for item in parse_feed(r.text):
-            art = to_article(item, index, universe.cache, "prnewswire", 420)
-            if art:
-                arts[art["id"]] = art
-    newest = sorted(arts.values(), key=lambda a: a["created_at"], reverse=True)[:count]
     expectations = Expectations(Finnhub(env("FINNHUB_API_KEY", "")), journal)
-    print(f"{len(arts)} zugeordnete Pressemitteilungen in den Feeds, geprüft werden die {len(newest)} neuesten. "
-          f"Finnhub nennt {await expectations.refresh(force=True)} Firmen mit Bericht gestern bis morgen.")
+    if sec:
+        newest = await filings(cfg, universe, journal, count)
+        print(f"Geprüft werden die {len(newest)} neuesten Pflichtmitteilungen handelbarer Firmen ohne Quartalszahlen.")
+        await expectations.refresh(force=True)
+    else:
+        for url in cfg["wires"]["feeds"][:4]:
+            r = await wires.http.get(url)
+            for item in parse_feed(r.text):
+                art = to_article(item, index, universe.cache, "prnewswire", 420)
+                if art:
+                    arts[art["id"]] = art
+        newest = sorted(arts.values(), key=lambda a: a["created_at"], reverse=True)[:count]
+        print(f"{len(arts)} zugeordnete Pressemitteilungen in den Feeds, geprüft werden die {len(newest)} neuesten. "
+              f"Finnhub nennt {await expectations.refresh(force=True)} Firmen mit Bericht gestern bis morgen.")
     llm, stats = Classifier(env("ANTHROPIC_API_KEY", ""), cfg["llm"]), StockStats(api)
     for art in newest:
         sym, published = art["symbols"][0], parse_ts(art["created_at"])
         print(f"\n{sym}  {art['created_at']}  (vor {(now() - published).total_seconds() / 60:.0f} min)  {art['headline'][:90]}")
-        text = await wires.fetch_text(art["url"])
-        print(f"  Text der Meldung: {len(text)} Zeichen" + (f"  «{text[:110]}…»" if text else "  (nicht abrufbar, es bleibt der Anriss)"))
+        if sec:
+            t0 = time.monotonic()
+            text = await art["fetch"]()
+            art = {**art, "fetch": None, "text": text}       # fetched once: the bot's own run below reuses it
+            print(f"  Text der Pflichtmitteilung: {len(text)} Zeichen in {time.monotonic() - t0:.1f} s"
+                  + (f"  «{text[:110]}…»" if text else "  (nicht abrufbar: der Bot würde sie nicht bewerten)"))
+            if not text:
+                continue
+        else:
+            text = await wires.fetch_text(art["url"])
+            print(f"  Text der Meldung: {len(text)} Zeichen" + (f"  «{text[:110]}…»" if text else "  (nicht abrufbar, es bleibt der Anriss)"))
         dry = NoOrders()
         fast = FastStrategy(api, cfg, journal, AfterHours(), universe, dry, llm, stats=stats,
                             expectations=expectations, fetch_text=wires.fetch_text)
@@ -95,4 +135,5 @@ async def main(count):
 
 
 if __name__ == "__main__":
-    asyncio.run(main(int(sys.argv[1]) if len(sys.argv) > 1 else 3))
+    args = [a for a in sys.argv[1:] if a != "sec"]
+    asyncio.run(main(int(args[0]) if args else 3, sec="sec" in sys.argv[1:]))

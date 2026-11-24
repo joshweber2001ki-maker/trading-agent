@@ -112,10 +112,21 @@ class Speed:
             if kind == "news_speed":
                 done.add((r.get("src"), r.get("ref")))
             elif kind == "wire_item" and r.get("symbol") and r.get("published") and r.get("id"):
+                if r.get("alert"):
+                    continue                # a law firm's call to shareholders: no announcement of the company
                 events[(r.get("source") or "wire", r["id"])] = {
                     "symbol": r["symbol"], "t0": parse_ts(r["published"]), "headline": (r.get("headline") or "")[:80]}
             elif kind == "sec_item" and r.get("symbol") and r.get("accepted") and r.get("acc"):
                 events[("sec", r["acc"])] = {"symbol": r["symbol"], "t0": parse_ts(r["accepted"]), "items": r.get("items")}
+        # A source that is only measured (its name starts with one of `secondary`) repeats what the
+        # wires and the SEC's list carry. Such a copy would be measured twice: it counts only where
+        # no other source has an announcement of the same stock in the same minute.
+        secondary = tuple(self.cfg.get("secondary") or ())
+        if secondary:
+            firsthand = {(v["symbol"], iso(v["t0"])[:16]) for k, v in events.items()
+                         if not k[0].startswith(secondary)}
+            events = {k: v for k, v in events.items()
+                      if not (k[0].startswith(secondary) and (v["symbol"], iso(v["t0"])[:16]) in firsthand)}
         latest = now() - timedelta(seconds=SETTLE_S)
         earliest = now() - timedelta(days=self.cfg["lookback_days"])
         out = [{"src": k[0], "ref": k[1], **v} for k, v in events.items()

@@ -44,6 +44,26 @@ TICKER = re.compile(r"\((?:NASDAQ|Nasdaq|NYSE|NYSE American|NYSE Arca|AMEX|NYSEA
 # Business Wire's opening line: "CITY--(BUSINESS WIRE)--Name (NYSE: ACME) ..." The ticker counts only there.
 BW_OPENING = re.compile(r"\(BUSINESS WIRE\)\s*--\s*([^()]{1,90}?)\s*(?:\([^()]{0,60}\)\s*)?\((?:NASDAQ|Nasdaq|NYSE|NYSE American|NYSE Arca|AMEX)\s*:\s*([A-Z]{1,5})\)")
 BW_NOT_A_NAME = re.compile(r"\b(today|announc\w*|said|says|with|partner\w*|signed|agreement|deal)\b", re.I)
+# Law firms looking for clients among shareholders ("INVESTOR ALERT", "class action", "lead plaintiff
+# deadline"). They come by the dozen for stocks that have already fallen and say nothing new about the
+# company: a quarter of all matched releases in the week of 17.11.2026, none of them rated with a direction.
+ALERT = re.compile(
+    r"(investor alert|shareholder alert|\$hareholder|stockholder alert|deadline alert|investor (notice|reminder|deadline)|"
+    r"shareholder (notice|reminder|rights law)|class action|securities fraud|lead plaintiff|law firm|\bLLP\b|"
+    r"sued for securities|securities law violations|investors? (have|who|with) (opportunity|lost|losses|substantial)|"
+    r"investigat\w+ (claims )?on behalf of|encourages .{0,60}investors|notifies investors|suewallst|"
+    r"(shareholder|investor) investigation|investigation notice|"
+    r"pomerantz|hagens berman|bronstein,? gewirtz|levi & korsinsky|rosen law|faruqi|glancy prongay|kessler topaz|"
+    r"schall law|johnson fistel|bragar eagel|kirby mcinerney|halper sadeh|robbins geller|djs law)", re.I)
+
+
+# A company reporting on a lawsuit of its own is news, not an advertisement.
+OWN_CASE = re.compile(r"\b(settle[sd]?|settlement|dismiss(es|ed|al)|prevails?|wins|ruling|verdict|appeal)\b", re.I)
+
+
+def is_alert(headline: str) -> bool:
+    """True for a law firm's call to shareholders (see ALERT)."""
+    return bool(ALERT.search(headline or "")) and not OWN_CASE.search(headline or "")
 
 
 def normalize(name: str) -> str:
@@ -233,9 +253,12 @@ class Wires:
                 # Every matched release with its publication time, at any hour and whether or not
                 # it is rated: the list cannot be rebuilt later (the feed only holds the newest
                 # items), and it is what a study of how fast prices react needs.
+                alert = is_alert(art["headline"])
                 self.journal.event("wire_item", id=art["id"], symbol=art["symbols"][0], published=art["created_at"],
-                                   headline=art["headline"][:140], source=art["source"], company=art["company"][:60])
-                spawn(self.on_article(art))
+                                   headline=art["headline"][:140], source=art["source"], company=art["company"][:60],
+                                   **({"alert": True} if alert else {}))
+                if not alert:               # a law firm's call to shareholders is listed, but neither rated nor measured
+                    spawn(self.on_article(art))
 
     async def fetch_text(self, url: str, timeout_s: float = 4.0) -> str:
         """The full text of a release from the wire's own page; empty if that fails or takes too long."""

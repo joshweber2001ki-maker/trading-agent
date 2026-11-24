@@ -3,6 +3,17 @@
 Stand: 20.11.2026, nach der Messung der Spanne (`memory/strategy.md`, „Dritte Auswertung“).
 Umgesetzt ist davon nichts. Ein Ja von Josh gilt für die Tabelle unten.
 
+**Nachtrag vom 24.11.2026:** Josh hat die Tabelle am 24.11. freigegeben (zusammen mit
+`reports/2026-11-24-vorschlag-zielsetup.md`); sie ist umgesetzt und ab dem Neustart am Abend aktiv.
+Drei Punkte weichen ab: (1) Die Kursquelle zählt nur, wenn ihre Spanne selbst höchstens 0,5 % zeigt.
+Sie sieht in der Handelszeit nur eine Börse; eine weite Spanne dort sagt nichts über den Markt, deshalb
+entscheidet dann die Probe. (2) Die alte Regel mit Kursbestätigung und Alpacas Nachrichtenstrom sind
+ganz abgeschaltet statt weiterzulaufen. (3) Kommt der Rückweg der Probe nicht zustande, geht die eine
+Aktie mit einem Limit weit durch den Markt zurück statt mit der gewöhnlichen Ausstiegs-Order: Die reicht
+höchstens 2 % durch den Markt und hätte bei den häufigen Spannen über 4 % die Aktie liegen lassen. In der
+Handelszeit rechnen Stop und Ziel ab dem gesehenen Briefkurs, weil sie mit der Order zum Broker gehen.
+RTPR ist verworfen.
+
 ## Warum
 
 Vor und nach der Börse liegt die Spanne zwischen Geld- und Briefkurs direkt nach einer Meldung bei

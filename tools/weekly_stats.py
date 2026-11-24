@@ -284,7 +284,27 @@ def fast_limits(root):
         return 7, 7, 1
 
 
-def fast_stats(rated, speed, skipped, rejected, limits):
+KINDS = {"sec": "SEC-Pflichtmitteilungen"}      # every other source is a press release
+
+
+def look_stats(probes, rejected, trades):
+    """The look at the market before an entry: how often the bot found bid and offer and how far apart
+    they were. A probe is one share bought (or sold short) and handed straight back."""
+    med = lambda xs: (lambda v: round(v[len(v) // 2], 2) if v else None)(sorted(x for x in xs if x is not None))
+    good = [p for p in probes if p.get("ok")]
+    # every look that got as far as seeing both sides: rejected candidates and the trades that followed
+    seen = [e for e in rejected if e.get("spread_pct") is not None] \
+        + [t["meta"]["market"] for t in trades if (t.get("meta") or {}).get("market")]
+    return {
+        "probes": len(probes), "probes_ok": len(good), "probe_seconds_median": med(p.get("seconds") for p in good),
+        "probe_failed": dict(Counter(p.get("reason", "?") for p in probes if not p.get("ok")).most_common()),
+        "looks": len(seen), "by_feed": sum(1 for e in seen if e.get("how") == "feed"),
+        "spread_median": med(e.get("spread_pct") for e in seen),
+        "narrow": sum(1 for e in seen if e["spread_pct"] <= 0.5),
+    }
+
+
+def fast_stats(rated, speed, skipped, rejected, limits, shadows=()):
     """The ratings of the immediate entry against what the price did after the same announcement.
 
     Every rating is logged, with or without a trade. The price path is the nightly measurement of
@@ -336,6 +356,19 @@ def fast_stats(rated, speed, skipped, rejected, limits):
 
     directed = [e for e in rated if direction(e) in ("up", "down")]
     quiet = [e for e in rated if direction(e) == "none" and after(e)]
+    kind = lambda e: KINDS.get(e.get("source"), "Pressemitteilungen")
+    category = lambda e: (e.get("verdict") or {}).get("category") or "?"
+
+    def short(rows):
+        g = group(rows)
+        return {k: g[k] for k in ("n", "measured", "right_5", "wrong_5", "flat_5", "movers", "movers_right")}
+    # The other models' ratings of the same announcements: how often they agree with the deciding
+    # model on the direction, and how their own direction held up against the price.
+    mine = {(e.get("source"), e.get("article")): direction(e) for e in rated}
+    by_model = {}
+    for e in shadows:
+        if e.get("verdict"):
+            by_model.setdefault(e.get("model") or "?", []).append(e)
     cost = 0.0
     for e in rated:
         pin, pout = PRICES.get(e.get("model"), (0.0, 0.0))
@@ -352,29 +385,60 @@ def fast_stats(rated, speed, skipped, rejected, limits):
                  "moved_anyway": sum(1 for e in quiet if mover(after(e)))},
         "skipped": dict(Counter(e.get("reason", "?") for e in skipped).most_common()),
         "rejected": dict(Counter(e.get("reason", "?") for e in rejected).most_common()),
+        # what kind of announcement, and what the rating took it for: a kind is worth trading only
+        # once enough of its ratings have been measured and enough of them were right
+        "by_kind": {k: {"rated": sum(1 for e in rated if kind(e) == k),
+                        "directed": short([e for e in directed if kind(e) == k]),
+                        "candidates": short([e for e in directed if kind(e) == k and candidate(e)])}
+                    for k in sorted({kind(e) for e in rated})},
+        "by_category": {c: short([e for e in directed if category(e) == c])
+                        for c in sorted({category(e) for e in directed})},
+        "shadows": {m: {"n": len(rows),
+                        "same_direction": sum(1 for e in rows if direction(e) == mine.get((e.get("source"), e.get("article")))),
+                        "of": sum(1 for e in rows if (e.get("source"), e.get("article")) in mine),
+                        "directed": short([e for e in rows if direction(e) in ("up", "down")]),
+                        "candidates": short([e for e in rows if candidate(e)]),
+                        "seconds_median": med(e.get("model_s") for e in rows)}
+                    for m, rows in sorted(by_model.items())},
     }
 
 
-def source_stats(wire_items, dups):
-    """Per news source: how many releases it delivered, how late (seen by the bot minus the time stamp
-    of the release; the wires stamp to the minute or second), and how often it was first or a copy."""
-    by = {}
-    for e in wire_items:
+def source_stats(wire_items, dups, sec_items=()):
+    """Per news source: how many announcements it delivered, how late (seen by the bot minus the time
+    stamp of the release, for the SEC's list minus the time of acceptance; the wires stamp to the
+    minute or second), how many were a law firm's call to shareholders, and how often it was first
+    or a copy. Announcements seen more than 15 minutes late (a restart, the SEC's backlog of the
+    night) count in the number, not in the delay."""
+    by, alerts = {}, Counter()
+    rows = [(e, e.get("source") or "?", e.get("published")) for e in wire_items] \
+        + [(e, "sec", e.get("accepted")) for e in sec_items]
+    for e, src, published in rows:
         try:
             lag = (datetime.fromisoformat(e["t"].replace("Z", "+00:00"))
-                   - datetime.fromisoformat(e["published"].replace("Z", "+00:00"))).total_seconds()
+                   - datetime.fromisoformat(published.replace("Z", "+00:00"))).total_seconds()
         except (KeyError, ValueError, AttributeError):
             continue
-        by.setdefault(e.get("source") or "?", []).append(lag)
+        by.setdefault(src, []).append(lag)
+        alerts[src] += bool(e.get("alert"))
     out = {}
     for src, lags in sorted(by.items()):
         live = sorted(x for x in lags if 0 <= x <= 900)
         q = lambda f: round(live[min(len(live) - 1, int(len(live) * f))]) if live else None
-        out[src] = {"n": len(lags), "lag_median_s": q(0.5), "lag_q25_s": q(0.25), "lag_q75_s": q(0.75),
+        out[src] = {"n": len(lags), "live": len(live), "lag_median_s": q(0.5), "lag_q25_s": q(0.25), "lag_q75_s": q(0.75),
+                    "alerts": alerts[src],
                     "first_of_dups": sum(1 for d in dups if d.get("first_source") == src),
                     "copies": sum(1 for d in dups if d.get("source") == src)}
-    pairs = Counter((d.get("first_source"), d.get("source")) for d in dups)
-    return {"by_source": out, "dup_pairs": {f"{a} vor {b}": n for (a, b), n in pairs.most_common(10)}}
+    pairs = {}
+    for d in dups:
+        pairs.setdefault((d.get("first_source"), d.get("source")), []).append(d.get("lag_s"))
+    top = sorted(pairs.items(), key=lambda kv: -len(kv[1]))[:10]
+
+    def med(xs):
+        xs = sorted(x for x in xs if x is not None)
+        return round(xs[len(xs) // 2]) if xs else None
+    return {"by_source": out, "dup_pairs": {f"{a} vor {b}": len(v) for (a, b), v in top},
+            # how much later the copy came: this is what shows whether one source is really faster than another
+            "dup_lag_s": {f"{a} vor {b}": med(v) for (a, b), v in top}}
 
 
 def build(root: Path, start: date, end: date):
@@ -468,11 +532,15 @@ def build(root: Path, start: date, end: date):
         },
         "models": model_stats(classified, shadows, fallbacks, outcomes, news_limits(root)),
         "sources": source_stats([e for e in events if e["kind"] == "wire_item"],
-                                [e for e in events if e["kind"] == "news_dup"]),
+                                [e for e in events if e["kind"] == "news_dup"],
+                                [e for e in events if e["kind"] == "sec_item"]),
         "fast": {
             **fast_stats([e for e in events if e["kind"] == "fast_rated"], speed,
                          [e for e in events if e["kind"] == "fast_skipped"],
-                         [e for e in events if e["kind"] == "fast_rejected"], fast_limits(root)),
+                         [e for e in events if e["kind"] == "fast_rejected"], fast_limits(root),
+                         [e for e in events if e["kind"] == "fast_shadow"]),
+            "look": look_stats([e for e in events if e["kind"] == "fast_probe"],
+                               [e for e in events if e["kind"] == "fast_rejected"], by_strategy.get("fast", [])),
             "trades_by_session": {SESSIONS.get(k, k): trade_stats([t for t in by_strategy.get("fast", []) if t.get("phase") == k])
                                   for k in sorted({t.get("phase") or "?" for t in by_strategy.get("fast", [])})},
         },
@@ -570,15 +638,17 @@ def markdown(r):
 
     so = r["sources"]
     if so["by_source"]:
-        out += ["", "## Nachrichtenquellen (Pressemitteilungen)",
-                "(Verspätung = beim Bot angekommen minus Zeitstempel der Meldung, Median und mittlere Hälfte; "
+        out += ["", "## Nachrichtenquellen (Pressemitteilungen und SEC-Liste)",
+                "(Verspätung = beim Bot angekommen minus Zeitstempel der Meldung, bei der SEC minus Annahmezeit; Median und "
+                "mittlere Hälfte der Meldungen, die binnen 15 Minuten ankamen. „wa-…“ = über WireAlpha, nur gemessen. "
                 "„zuerst“ / „Kopie“ = dieselbe Nachricht kam auch über eine andere Quelle)",
-                "| Quelle | Meldungen | Verspätung | zuerst | Kopie |", "|---|---|---|---|---|"]
+                "| Quelle | Meldungen | binnen 15 min | Verspätung | Kanzlei-Aufrufe | zuerst | Kopie |", "|---|---|---|---|---|---|---|"]
         for src, v in so["by_source"].items():
             lag = f'{v["lag_median_s"]} s ({v["lag_q25_s"]}–{v["lag_q75_s"]})' if v["lag_median_s"] is not None else "?"
-            out.append(f'| {src} | {v["n"]} | {lag} | {v["first_of_dups"]} | {v["copies"]} |')
+            out.append(f'| {src} | {v["n"]} | {v["live"]} | {lag} | {v["alerts"]} | {v["first_of_dups"]} | {v["copies"]} |')
         if so["dup_pairs"]:
-            out.append(f'- doppelt gemeldet: {so["dup_pairs"]}')
+            out.append("- doppelt gemeldet (Anzahl, und um wie viele Sekunden die Kopie im Median später kam): "
+                       + "; ".join(f'{k}: {n} ({so["dup_lag_s"].get(k)} s)' for k, n in so["dup_pairs"].items()))
     fa = r["fast"]
     if fa["rated"]:
         lim = fa["limits"]
@@ -597,7 +667,7 @@ def markdown(r):
                 "(Richtig heißt: Der Kurs lag danach auf der vorhergesagten Seite des Kurses vor der Meldung. Ob ein Trade sich "
                 f"gelohnt hätte, sagt das nicht. Handelbarer Ausschlag: mindestens {MOVER_PCT:g} % und "
                 + f"{LIQUID_USD:,} $ Umsatz in 5 Minuten.)".replace(",", "."),
-                f'- bewertet: {fa["rated"]} Pressemitteilungen {fa["by_session"]}, {fa["with_text"]} mit vollem Text, '
+                f'- bewertet: {fa["rated"]} Meldungen {fa["by_session"]}, {fa["with_text"]} mit vollem Text, '
                 f'{fa["with_expectations"]} mit Erwartungen; Alter beim Eintreffen {fa["age_s_median"]} s, Antwortzeit '
                 f'{fa["seconds_median"]} s, Kosten {fa["cost"]} $',
                 f'- Bewertungen mit Richtung: {fg(fa["directed"])}',
@@ -606,6 +676,31 @@ def markdown(r):
                 f'handelbarer Ausschlag bei {fa["none"]["moved_anyway"]}',
                 f'- nicht bewertet (Grund): {fa["skipped"] or "keine"}',
                 f'- Kandidaten ohne Einstieg (Grund): {fa["rejected"] or "keine"}']
+        def fk(g):
+            if not g["n"]:
+                return "keine"
+            if not g["measured"]:
+                return f'{g["n"]} (noch nicht gemessen)'
+            return (f'{g["n"]}, gemessen {g["measured"]}: richtig {g["right_5"]}, falsch {g["wrong_5"]}, ohne Bewegung '
+                    f'{g["flat_5"]}; bei handelbaren Ausschlägen richtig {g["movers_right"]} von {g["movers"]}')
+        out += [f'- {k}: bewertet {v["rated"]}; mit Richtung {fk(v["directed"])}; Kandidaten {fk(v["candidates"])}'
+                for k, v in fa["by_kind"].items()]
+        if fa["by_category"]:
+            out.append("- nach Art der Meldung laut KI (Bewertungen mit Richtung; richtig / falsch / ohne Bewegung "
+                       "unter den gemessenen): "
+                       + "; ".join(f'{c} {g["n"]} ({g["right_5"]} / {g["wrong_5"]} / {g["flat_5"]})'
+                                   for c, g in fa["by_category"].items()))
+        lo = fa["look"]
+        if lo["probes"] or lo["looks"]:
+            out.append(f'- Blick auf den Markt vor dem Einstieg: {lo["looks"]}-mal Geld- und Briefkurs gesehen '
+                       f'({lo["by_feed"]} über die Kursquelle, sonst per Probe mit 1 Aktie), Spanne im Median '
+                       f'{lo["spread_median"]} %, höchstens 0,5 % bei {lo["narrow"]}. Proben: {lo["probes"]}, davon '
+                       f'{lo["probes_ok"]} hin und zurück ausgeführt (Dauer im Median {lo["probe_seconds_median"]} s); '
+                       f'nicht gelungen: {lo["probe_failed"] or "keine"}')
+        for m, v in fa["shadows"].items():
+            out.append(f'- mitbewertet von {m}: {v["n"]} Meldungen (Antwortzeit {v["seconds_median"]} s), gleiche Richtung wie '
+                       f'das entscheidende Modell bei {v["same_direction"]} von {v["of"]}; eigene Bewertungen mit Richtung '
+                       f'{fk(v["directed"])}; eigene Kandidaten {fk(v["candidates"])}')
         out += [f'- Trades {k}: {fmt(v)}' for k, v in fa["trades_by_session"].items()]
         if fa["directed"]["examples"]:
             out.append("- Bewertungen mit Richtung, größte Bewegung zuerst (Kurs nach 1 / 5 / 15 Minuten):")

@@ -46,7 +46,8 @@ class FirstReport:
             return False
         t = now()
         head = art.get("headline") or ""
-        ws, results = words(head), bool(RESULTS.search(head))
+        # A source that knows what it reports says so ("results"); otherwise the headline is read.
+        ws, results = words(head), bool(art["results"] if "results" in art else RESULTS.search(head))
         try:
             published = parse_ts(art["created_at"]) if art.get("created_at") else None
         except (TypeError, ValueError):

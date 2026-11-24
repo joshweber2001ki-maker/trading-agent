@@ -33,6 +33,10 @@ def position_size(equity, price, stop, risk_pct, max_pos_lev, gross_room, buying
     return max(0, int(min(by_risk, room / price)))
 
 
+PROBE_CLOSE_PCT = 20.0   # how far through the first fill the one share of a probe is handed back if the way back at
+                         # the tested distance did not fill. It fills at the market's other side, wherever that is.
+
+
 def is_live(order: dict) -> bool:
     """True while the broker may still fill the order (or has not yet confirmed a cancel)."""
     return order["status"] in LIVE or order["status"].startswith("pending")
@@ -188,6 +192,8 @@ class Executor:
         # Entries are decided one after the other. Two announcements in the same second must not
         # both pass the limits before either of them is on the books.
         self._entering = asyncio.Lock()
+        self._probing = set()     # stocks in which a probe (one share there and back) is under way
+        self.stray = {}           # stock -> order of a probe that may have left a share behind (None: a position)
 
     # ── state ────────────────────────────────────────────────────────────────
     def save(self):
@@ -260,6 +266,132 @@ class Executor:
     def mark(self, q: dict):
         return mark_price(q, self.ext["trade_fresh_s"], self.ext["max_mark_spread_pct"])
 
+    async def probe(self, symbol, side, limit, wait_s=3.0, back_pct=0.5) -> dict:
+        """Find out bid and offer by trading one share there and back.
+
+        Outside regular hours the free price feed shows next to nothing, but the paper account fills
+        a limit order at the real offer (a buy) or the real bid (a sell). So: one share in the
+        direction of the planned trade with the limit the trade itself would use, and at once one
+        share back with a limit `back_pct` percent worse than that fill. The two fills are the two
+        sides of the market. Each step waits at most `wait_s` seconds.
+
+        Returns {"ok": True, "bid", "ask", "spread_pct", "seconds"} or {"ok": False, "reason", ...}:
+        probe_no_fill (the market is beyond the limit: the price has run away), spread (the way back
+        did not fill: bid and offer are further apart than back_pct; the share then goes back far
+        through the market, and that fill shows where the other side was), probe_busy (the bot
+        already holds or probes this stock: the share could not be told apart from that position),
+        probe_error. Whatever is left of the one share is closed before this returns; if that fails
+        too, the stock is closed to entries (`stray`) until the share is gone.
+        """
+        dirn = 1 if side == "long" else -1
+        out_side, back_side = ("buy", "sell") if dirn > 0 else ("sell", "buy")
+        soft = self.session.phase() in ("pre", "post")
+        tag, t0 = f"probe-{symbol}-{uuid.uuid4().hex[:8]}", time.monotonic()
+        row = dict(symbol=symbol, side=side, limit=round(float(limit), 2))
+
+        def done(ok, **kw):
+            res = {"ok": ok, "seconds": round(time.monotonic() - t0, 2), **kw}
+            self.journal.event("fast_probe", **row, **res)
+            return res
+
+        if symbol in self._probing or symbol in self.stray or any(t.symbol == symbol for t in self.trades.values()):
+            return done(False, reason="probe_busy")
+        self._probing.add(symbol)
+        try:
+            return await self._probe(symbol, dirn, out_side, back_side, soft, tag, float(limit), wait_s, back_pct, done)
+        finally:
+            self._probing.discard(symbol)
+
+    async def _still_stray(self, symbol) -> bool:
+        """Whether what a probe may have left behind in this stock is still there (an order that
+        would not be cancelled, or a share that would not be sold). Once it is gone the stock is free again."""
+        try:
+            oid = self.stray.get(symbol)
+            if oid and is_live(await self.api.order(oid)):
+                return True
+            if await self.api.position(symbol) is not None:
+                return True
+        except Exception:
+            return True                     # cannot tell: stay out
+        self.stray.pop(symbol, None)
+        return False
+
+    async def _probe(self, symbol, dirn, out_side, back_side, soft, tag, limit, wait_s, back_pct, done) -> dict:
+
+        async def send(order_side, price, n):
+            """One share with a limit. Returns (the price it was filled at or None, the order if it is still working)."""
+            p = {"symbol": symbol, "qty": "1", "side": order_side, "type": "limit", "limit_price": str(round(price, 2)),
+                 "time_in_force": "day", "client_order_id": f"{tag}-{n}"}
+            if soft:
+                p["extended_hours"] = True
+            o = await self.api.submit(p)
+            for _ in range(max(1, int(wait_s / 0.25))):
+                if not is_live(o) or o["status"] == "filled":
+                    break
+                await asyncio.sleep(0.25)
+                o = await self.api.order(o["id"])
+            if is_live(o) and o["status"] != "filled":
+                await self._released(o["id"])
+                o = await self.api.order(o["id"])       # it may have filled while the cancel was on its way
+            filled = float(o.get("filled_qty") or 0)
+            price = float(o["filled_avg_price"]) if filled > 0 and o.get("filled_avg_price") else None
+            return price, (o if is_live(o) and price is None else None)
+
+        def left_behind(what, order=None):
+            # No trade may go on top of it; the end of the session closes whatever is still there.
+            self.stray[symbol] = order["id"] if order else None
+            self.journal.event("error", where="probe_leftover", symbol=symbol, error=what)
+
+        first = back = None
+        failed = False
+        try:
+            first, stuck = await send(out_side, limit, 1)
+            if first is None:
+                if stuck:
+                    left_behind("the first order of a probe could not be cancelled", stuck)
+                return done(False, reason="probe_no_fill")
+            # The way back, at most back_pct worse than the price just paid: it fills if bid and offer are that close.
+            back, _ = await send(back_side, first * (1 - dirn * back_pct / 100), 2)
+            if back is None:
+                # They are further apart. The share goes back at the market's other side, wherever it
+                # is: an order far through the market is filled at the best price there.
+                other, _ = await send(back_side, first * (1 - dirn * PROBE_CLOSE_PCT / 100), 3)
+                if other is not None:
+                    ask, bid = (first, other) if dirn > 0 else (other, first)
+                    return done(False, reason="spread", bid=bid, ask=ask, wider_than_pct=back_pct,
+                                spread_pct=round(max(0.0, ask - bid) / ((ask + bid) / 2) * 100, 3))
+        except Exception as e:
+            failed = True
+            self.journal.event("error", where="probe", symbol=symbol, error=repr(e)[:300])
+        if first is None:
+            # It failed before the first fill was known. If the order reached the broker it may still fill.
+            try:
+                sent = await self.api.order_by_client_id(f"{tag}-1")
+            except Exception:
+                sent = {"id": None}
+            if sent is not None:
+                left_behind("a probe failed after its first order was sent", sent if sent.get("id") else None)
+            return done(False, reason="probe_error")
+        if back is None:
+            # The share is still there (the way back did not fill, or an order failed): close it the ordinary way.
+            try:
+                if soft:
+                    flat = await close_with_limit(self.api, symbol, self.ext, self.journal)
+                else:
+                    await self.api.close_position(symbol)
+                    flat = True
+            except Exception as e:
+                flat = False
+                self.journal.event("error", where="probe", symbol=symbol, error=repr(e)[:300])
+            if not flat:
+                left_behind("one share of a probe could not be closed")
+                return done(False, reason="probe_error", first=first)
+            return done(False, reason="probe_error" if failed else "spread", first=first, wider_than_pct=back_pct)
+        ask, bid = (first, back) if dirn > 0 else (back, first)
+        mid = (ask + bid) / 2
+        # The market can move between the two fills: a negative distance counts as none.
+        return done(True, bid=bid, ask=ask, spread_pct=round(max(0.0, ask - bid) / mid * 100, 3) if mid else None)
+
     def request_exit(self, symbol, reason) -> bool:
         """Ask for the trade in this symbol to be closed at the next check. True if there is one."""
         for t in self.trades.values():
@@ -286,6 +418,10 @@ class Executor:
             return False, "session"
         if any(t.symbol == symbol for t in self.trades.values()):
             return False, "already_in_symbol"
+        if symbol in self._probing:
+            return False, "probing"         # one share is on its way there and back in this stock right now
+        if symbol in self.stray and await self._still_stray(symbol):
+            return False, "stray_share"     # a probe left something behind: no trade on top of it
         if max_open and sum(1 for t in self.trades.values() if t.strategy == strategy) >= max_open:
             return False, "max_open_strategy"
         if (strategy, symbol) in self.done_today:
@@ -331,7 +467,11 @@ class Executor:
         from_fill = bool(sig.get("stop_pct"))
         # Size and risk are worked out for the worst case: filled exactly at the limit.
         basis = float(sig.get("limit_price") or price) if from_fill else price
-        stop = basis * (1 - dirn * sig["stop_pct"] / 100) if from_fill else float(sig["stop"])
+        # Stop and target count from the fill. During the session they go to the broker with the
+        # order, before there is a fill: then from the price the market was seen at (expected_fill),
+        # which is where the order will be filled, not from the limit a little beyond it.
+        near = float(sig.get("expected_fill") or basis)
+        stop = near * (1 - dirn * sig["stop_pct"] / 100) if from_fill else float(sig["stop"])
         base = dict(strategy=strategy, symbol=symbol, side=side, price=price)
         phase = self.session.phase()
         soft = phase in ("pre", "post")      # outside regular hours the broker takes no stop and no bracket
@@ -368,7 +508,7 @@ class Executor:
         else:
             limit = round(price * (1 + dirn * offset / 100), 2)
         if from_fill:
-            target = round(basis * (1 + dirn * sig["target_pct"] / 100), 2)   # provisional, reset at the fill
+            target = round(near * (1 + dirn * sig["target_pct"] / 100), 2)    # out of hours provisional, reset at the fill
         else:
             target = round(price + dirn * sig["target_r"] * dist, 2)
         stop = round(stop, 2)

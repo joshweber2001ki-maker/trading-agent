@@ -41,14 +41,17 @@ exit_retry_s                = 4     # nicht ausgeführten Ausstieg nach dieser Z
 guard_stale_s               = 180   # der Wächter schließt offene Positionen, wenn der Bot so lange kein Lebenszeichen gegeben hat
 
 [fast]
-# Sofort-Einstieg nach einer frischen Meldung, vor und nach der Börse (braucht [extended]).
-# Der Bot hat dort keinen Kurs in Echtzeit. Er setzt deshalb ein Limit, das vom letzten Kurs VOR der
-# Meldung ausgeht und einen Teil der erwarteten Bewegung zulässt: Das Paper-Konto führt zum echten Kurs
-# aus oder gar nicht. Stop und Ziel zählen ab dem Ausführungskurs.
-# Eingeschaltet am 19.11.2026 mit Joshs Freigabe der Werte (15:17 Uhr), aktiv ab dem Neustart um 22:07 Uhr.
-# Erste, schmale Fassung: Quelle ist nur PR Newswire (kommt Minuten zu spät), bewertet wird mit dem Modell aus [llm].
+# Sofort-Einstieg nach einer frischen Meldung: vor der Börse, in der Handelszeit und nach der Börse
+# (vor und nach der Börse braucht er [extended]).
+# Erste Fassung (Freigabe Josh 19.11.2026): Limit ab dem letzten Kurs VOR der Meldung, Stop und Ziel ab
+# dem Ausführungskurs. Zweite Fassung (Freigabe Josh 24.11.2026, Vorschlag vom 20.11.): Vor dem Einstieg
+# stellt der Bot Geld- und Briefkurs fest ([fast.look]) und steigt nur bei enger Spanne ein; der
+# Sofort-Einstieg läuft auch in der Handelszeit. Schwerpunkt sind Meldungen ohne Quartalszahlen.
 enabled            = true
-sessions           = ["pre", "post"]   # in der regulären Handelszeit gilt weiter die alte Regel mit Kursbestätigung
+sessions           = ["pre", "regular", "post"]
+regular_start_after_open_min      = 5    # in der Handelszeit: kein Einstieg in den ersten Minuten ...
+regular_no_entry_before_close_min = 30   # ... und kurz vor Schluss (wie die alte Regel)
+shadows            = true     # die Modelle aus [llm] shadow bewerten jede Meldung mit (fast_shadow), ohne Einfluss auf den Handel
 max_age_s          = 300      # so alt darf die Meldung höchstens sein (PR Newswire kommt 1,5 bis 3,5 Minuten verspätet)
 min_surprise       = 7        # KI-Bewertung 0-10
 min_confidence     = 7        # KI-Bewertung 0-10
@@ -72,11 +75,32 @@ text_chars         = 6000     # so viele Zeichen davon bekommt die KI
 3 = 10.0
 
 [fast.max_hold_min]           # Zeitlimit je Sitzung (Freigabe Josh 19.11.2026: höchstens 15 Minuten)
-pre  = 15
-post = 10
+pre     = 15
+regular = 15
+post    = 10
+
+[fast.look]
+# Blick auf den Markt vor dem Einstieg (zweite Fassung). Geld- und Briefkurs kommen aus der Kursquelle,
+# wenn sie beide zeigt und sie frisch sind, sonst aus einer Probe: 1 Aktie in Richtung der Bewertung
+# handeln und sofort zurückhandeln; die beiden Ausführungskurse sind Brief- und Geldkurs.
+# In der Handelszeit zählen Stop und Ziel ab dem so gesehenen Kurs und gehen mit der Order zum Broker.
+enabled          = true
+quote_fresh_s    = 10     # so alt darf der Kurs der Kursquelle höchstens sein
+max_spread_pct   = 0.5    # Einstieg nur, wenn Geld- und Briefkurs höchstens so weit auseinanderliegen
+max_against_pct  = 0.5    # ... und der Kurs seit vor der Meldung höchstens so weit GEGEN die Bewertung gelaufen ist
+limit_offset_pct = 0.2    # Limit der Order: so weit über dem Briefkurs (beim Leerverkauf unter dem Geldkurs),
+                          # höchstens das Limit der ersten Fassung
+probe_wait_s     = 3      # je Schritt der Probe höchstens so lange warten
+probe_back_pct   = 0.5    # das Zurückhandeln der Probe darf höchstens so viel schlechter sein; klappt das nicht,
+                          # ist die Spanne zu weit, und die eine Aktie geht mit einem Limit weit durch den Markt zurück
 
 [news]
-enabled                  = true
+# Alte Regel mit Kursbestätigung. Abgeschaltet am 24.11.2026 (Entscheidung Josh): Pressemitteilungen
+# gehen an den Sofort-Einstieg, und Alpacas Nachrichtenstrom (Stunden verspätet, jede siebte Meldung
+# zur falschen Firma) wird nicht mehr bewertet und nicht mehr gehandelt. Die Werte unten braucht der
+# Sofort-Einstieg weiter (Stop und Ziel je Wirkungs-Stufe, Schwankungsfaktor).
+enabled                  = false
+stream                   = false   # Alpacas Nachrichtenstrom gar nicht erst verbinden
 max_article_age_s        = 90    # ältere Meldungen aus Alpacas Strom werden nicht mehr gehandelt
 max_symbols              = 3     # Meldungen mit mehr Aktien sind Sammelartikel
 min_surprise             = 7     # KI-Bewertung 0-10: wie überraschend
@@ -185,19 +209,42 @@ businesswire = [
 # Nachrichten von Finnhub (kostenloses Konto): allgemeine Marktnachrichten und die Nachrichten der Firmen,
 # die heute berichten. Finnhub sammelt bei anderen Seiten ein; nur messen, nicht handeln (steht nicht in
 # [wires] trade). Ob es je schneller ist als die Verteiler, zeigt news_dup.
-enabled        = true
+# Abgeschaltet am 24.11.2026: gemessen 13 bis 14 Minuten nach der Veröffentlichung, nie zuerst.
+enabled        = false
 categories     = ["general", "merger"]
 market_every_s = 20      # die Marktnachrichten so oft
 company_every_s = 120    # jede berichtende Firma so oft
 max_companies  = 40
 
+[wirealpha]
+# Pressemitteilungen von WireAlpha (kostenlos, verspricht Zustellung in unter einer Sekunde; ungeprüft,
+# junger Anbieter). Nur messen: Jede Meldung steht als wire_item mit der Quelle "wa-<verteiler>" im
+# Protokoll; ob sie wirklich früher kommt als die Feeds der Verteiler, zeigt die Wochenstatistik
+# ("Nachrichtenquellen"). Gehandelt wird eine Quelle erst, wenn sie in [wires] trade steht.
+# Läuft nur mit Schlüssel auf dem Server: bash deploy/set-keys.sh wirealpha
+enabled = true
+sources = ["prnewswire", "businesswire", "globenewswire", "accesswire", "sec_edgar"]
+          # sec_edgar: Pflichtmitteilungen, wie WireAlpha sie meldet; zeigt, ob es sie früher sieht als der Bot selbst
+
 [edgar]
-# Pflichtmitteilungen an die US-Börsenaufsicht SEC (Formular 8-K): nur mitschreiben, nicht handeln.
+# Pflichtmitteilungen an die US-Börsenaufsicht SEC (Formular 8-K). Jede wird mitgeschrieben (Messung).
+# Seit 24.11.2026 werden frische Meldungen außerdem gelesen und bewertet (Sofort-Einstieg, Quelle "sec"):
+# Bei Meldungen ohne Quartalszahlen ist die Pflichtmitteilung oft die erste Veröffentlichung, und der
+# Kurs braucht ein bis zwei Minuten (gemessen 13. bis 23.11.: nach 60 Sekunden erst 4 % der Bewegung).
 # Läuft nur, wenn auf dem Server eine Kontaktadresse hinterlegt ist (/etc/trading-bot/sec.env,
 # SEC_CONTACT=...); die SEC verlangt sie bei automatischen Abfragen.
-enabled   = true
-poll_s    = 600    # alle 10 Minuten nach neuen Meldungen sehen
-max_pages = 8      # je 100 Meldungen; der Feed reicht etwa anderthalb Tage zurück
+enabled     = true
+poll_s      = 600    # alle 10 Minuten vollständig zurückblättern
+max_pages   = 8      # je 100 Meldungen; der Feed reicht etwa anderthalb Tage zurück
+fast_poll_s = 2      # dazwischen nur die neuesten Meldungen, so oft (Limit der SEC: 10 Abfragen je Sekunde);
+                     # nur von 6:00 bis 17:40 Uhr New Yorker Zeit, danach veröffentlicht die SEC erst am nächsten Morgen
+fast_count  = 40     # so viele Meldungen je schneller Abfrage
+rate        = true   # frische Meldungen lesen und bewerten (fast_rated mit source "sec")
+trade       = false  # ... und handeln. Aus, bis Josh es freigibt: bis dahin wird nur bewertet und gemessen
+skip_items  = ["5.03", "5.07", "9.01"]   # Meldungen, die NUR solche Punkte haben, werden nicht bewertet
+                     # (Satzungsänderung, Abstimmungsergebnis der Hauptversammlung, bloße Anlagen)
+skip_with_items = ["2.02"]   # Meldungen MIT einem dieser Punkte werden nicht bewertet: Quartalszahlen.
+                     # Dort war die Pressemitteilung fast immer Minuten früher da (16 von 17 Fällen)
 
 [speed]
 # Tempo-Messung einmal täglich nach Börsenschluss: Kursverlauf im Sekundentakt nach jeder
@@ -207,6 +254,8 @@ enabled         = true
 after_close_min = 25
 lookback_days   = 5      # so weit zurück werden noch nicht gemessene Meldungen nachgeholt
 max_events      = 1500   # höchstens so viele Meldungen pro Lauf
+secondary       = ["wa-", "finnhub"]   # Quellen, die nur gemessen werden: Ihre Meldung zählt nur, wo kein Verteiler
+                         # dieselbe Aktie in derselben Minute meldet (sonst würde dieselbe Meldung doppelt gemessen)
 detail          = true   # zu jeder Meldung in einer gehandelten Aktie den Verlauf genauer festhalten (alle 5 Sekunden
                          # über 5 Minuten, jede Minute bis 30 Minuten, Geld- und Briefkurs kurz danach), um später
                          # nachzurechnen, was ein Einstieg mit Stop, Ziel und Zeitlimit gebracht hätte

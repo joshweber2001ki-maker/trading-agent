@@ -22,6 +22,10 @@ Alle Zahlen stehen in `config.toml`; hier steht, was sie bedeuten und warum sie 
 
 ## Nachrichtenquellen
 
+Stand 24.11.2026: Gehandelt werden Pressemitteilungen von PR Newswire und Business Wire; Pflichtmitteilungen
+an die SEC werden gelesen und bewertet, WireAlpha gemessen; Alpacas Strom ist abgeschaltet. Siehe „Zweite
+Fassung im Handel“ weiter unten. Der Rest dieses Abschnitts beschreibt den Start am 17.11.
+
 1. **Alpacas Nachrichtenstrom.** Liefert seit 2026 nur noch KI-Zusammenfassungen des Anbieters
    fiscal.ai, gebündelt etwa zur Minute 02 und 32 jeder Stunde. Gemessen am 17.11.: dieselben
    Ereignisse kommen dort 18 bis über 90 Minuten nach der Pressemitteilung an (Median 50
@@ -48,6 +52,9 @@ Tagesschwankung. Beides rechnet der Code aus den Tageskursen der letzten Wochen.
 über eine andere Firma mit zufällig gleichem Kürzel stuft die KI auf 0.
 
 ## Strategie 1: Nachrichten (während der Handelszeit)
+
+Abgeschaltet seit 24.11.2026 (`[news] enabled = false`): In der Handelszeit gilt seitdem der
+Sofort-Einstieg. Die Werte für Stop und Ziel je Wirkungs-Stufe (`[news.impact.*]`) nutzt er weiter.
 
 Idee: nicht die erste Sekunde handeln (die gewinnen Profi-Systeme), sondern die
 Fortsetzung in den Minuten danach.
@@ -548,10 +555,114 @@ Richtung lagen nach 5 Minuten zwei richtig; fünf der sechs blieben unter den Sc
 Die kostenlose Kursquelle zeigte den ganzen Abend bei keiner von 25 Aktien mit Meldung einen brauchbaren
 Kurs. Die SEC-Liste lief ab 22:07 Uhr wieder.
 
+## Zweite Fassung im Handel (Freigabe Josh 24.11.2026): erst auf den Markt sehen, Schwerpunkt ohne Quartalszahlen
+
+Josh hat am 24.11.2026 den Vorschlag `reports/2026-11-24-vorschlag-zielsetup.md` freigegeben („Lass uns
+das so alles umbauen … Wir nehmen alles, was kostenlos ist und hilft“). Das ist die Stufe 0 dieses
+Vorschlags und schließt die zweite Fassung des Sofort-Einstiegs aus
+`reports/2026-11-20-vorschlag-zweite-fassung.md` ein. Aktiv ab dem ersten Neustart nach Börsenschluss
+am 24.11. (22:07 Uhr deutscher Zeit, falls dann keine Position offen ist).
+
+**Warum.** Messung an den eigenen Protokollen, nur Meldungen mit mindestens 1 % Bewegung und 100.000 $
+Umsatz in fünf Minuten, Richtung nachträglich bekannt:
+
+| Klasse | Fälle | nach 10 s gelaufen | nach 60 s gelaufen | Spanne (Median) | Spanne höchstens 0,5 % |
+|---|---|---|---|---|---|
+| Quartalszahlen per Pressemitteilung (16. bis 23.11.) | 19 | 43 % | 91 % | 4,9 % | 0 von 19 |
+| andere Pressemitteilungen (16. bis 23.11.) | 16 | 18 % | 59 % | 2,2 % | 3 von 16 |
+| SEC-Pflichtmitteilungen ohne Quartalszahlen (13. bis 23.11.) | 30 | 0 % | 4 % | 1,2 % | 9 von 30 |
+
+Die ersten Sekunden nach Quartalszahlen sind mit keiner Quelle zu holen. Bei Meldungen ohne Quartalszahlen
+braucht der Kurs 30 bis 120 Sekunden, und der Text entscheidet über die Richtung. Dort setzt der Bot an.
+
+**Was sich am Handel ändert**
+
+| Baustein | Wert | Wo |
+|---|---|---|
+| Zeiten | zusätzlich die Handelszeit: ab 5 Minuten nach Börsenbeginn bis 30 Minuten vor Börsenschluss; vor und nach der Börse wie bisher | `[fast] sessions`, `regular_start_after_open_min`, `regular_no_entry_before_close_min` |
+| Blick auf den Markt | vor jedem Einstieg Geld- und Briefkurs. Aus der Kursquelle, wenn sie beide zeigt, höchstens 10 Sekunden alt und höchstens 0,5 % auseinander; sonst per Probe | `[fast.look]` |
+| Probe | 1 Aktie in Richtung der Bewertung mit dem Limit der ersten Fassung, sofort zurück mit einem Limit 0,5 % schlechter als der erste Kurs; je Schritt höchstens 3 Sekunden. Die zwei Ausführungskurse sind Brief- und Geldkurs. Kommt der Rückweg nicht zustande, ist die Spanne weiter als 0,5 %: kein Einstieg. Die eine Aktie geht dann mit einem Limit weit durch den Markt (20 %) zurück; sie wird zum besten Kurs der Gegenseite ausgeführt, und der zeigt, wie weit die Spanne wirklich war. Bleibt trotzdem etwas liegen, ist die Aktie für Einstiege gesperrt, bis es weg ist (`stray_share`) | `probe_wait_s`, `probe_back_pct`, `Executor.probe` |
+| Einstieg nur, wenn | Spanne höchstens 0,5 %; Kurs seit vor der Meldung höchstens 0,5 % GEGEN die Bewertung; nicht weiter in ihre Richtung gelaufen als die halbe erwartete Bewegung | `max_spread_pct`, `max_against_pct`, `chase_frac` |
+| Order | Limit 0,2 % über dem gesehenen Briefkurs (Leerverkauf: unter dem Geldkurs), höchstens das Limit der ersten Fassung | `limit_offset_pct` |
+| Stop und Ziel | vor und nach der Börse wie bisher: ab dem Ausführungskurs, der Bot überwacht. In der Handelszeit gehen beide mit der Order zum Broker, gerechnet ab dem gesehenen Briefkurs (Leerverkauf: Geldkurs), zu dem die Order ausgeführt wird | `bot/executor.py`, `expected_fill` |
+| Zeitlimit | Handelszeit 15 Minuten, vorbörslich 15, nachbörslich 10 | `[fast.max_hold_min]` |
+| Bezugskurs | letzter Kurs des gesamten Marktes vor der Meldung (kostenlos, sobald 15 Minuten alt). In der Handelszeit die letzte volle Minute der kostenlosen Kursquelle vor der Meldung, wenn die jünger ist | `FastStrategy.reference_price` |
+| Unverändert | Schwellen (Überraschung 7, Sicherheit 7, Wirkung 1), Höchstalter 300 Sekunden, höchstens 10.000 $ (kleine Firmen 5.000 $), eine Position zur Zeit, je Aktie ein Trade am Tag | `[fast]` |
+
+Zur Kursquelle in der Handelszeit: Sie zeigt nur eine Börse (IEX). Eine enge Spanne dort ist auch im
+gesamten Markt eng. Eine weite sagt nichts, deshalb entscheidet dann die Probe.
+
+**Quellen**
+
+- **Pressemitteilungen** von PR Newswire und Business Wire handeln wie bisher, jetzt in allen drei Sitzungen.
+- **SEC-Pflichtmitteilungen (neu als Quelle).** Die Liste der neuesten 8-K wird werktags von 6:00 bis
+  17:40 Uhr New Yorker Zeit alle 2 Sekunden abgefragt (Limit der SEC: 10 Abfragen je Sekunde), dazu alle
+  10 Minuten vollständig. Eine Meldung erscheint dort rund 35 bis 60 Sekunden nach der Annahme; bisher sah
+  der Bot sie im Median nach gut fünf Minuten. Frische Meldungen (höchstens 10 Minuten alt) gehen an den
+  Sofort-Einstieg, mit dem Text des Berichts ab dem ersten Punkt und dem der Anlage 99. Nicht bewertet
+  werden Meldungen mit Quartalszahlen (Punkt 2.02: Die Pressemitteilung war in 16 von 17 Fällen früher da)
+  und reine Formalien (nur 5.03, 5.07 oder 9.01). Die KI bekommt als Vorwissen den Hinweis, dass ein 8-K
+  bis zu vier Werktage nach dem Ereignis kommen darf und oft eine ältere Pressemitteilung wiederholt.
+  **Gehandelt wird diese Quelle noch nicht** (`[edgar] trade = false`): Jede Bewertung wird protokolliert,
+  ein Kandidat endet als `fast_rejected` mit dem Grund `source_off`. Josh hat die Frage „gleich handeln
+  oder erst zwei Wochen messen“ noch nicht beantwortet. Nach 17:30 Uhr New Yorker Zeit Angenommenes
+  veröffentlicht die SEC erst um 6:00 Uhr am nächsten Morgen; dafür ist der Bot blind.
+- **WireAlpha (neu, nur gemessen).** Kostenlose Push-Verbindung für Pressemitteilungen von vier Verteilern
+  und SEC-Meldungen, laut Anbieter in unter einer Sekunde. Unabhängig bestätigt ist das nicht, der
+  Anbieter ist jung und kann den Dienst jederzeit beenden. Der Bot schreibt jede Meldung mit der Quelle
+  `wa-<verteiler>` mit; `news_dup` und die Wochenstatistik zeigen, ob sie früher kommt als die Feeds der
+  Verteiler. Gehandelt wird sie erst, wenn die Messung das zeigt und Josh zustimmt. Läuft erst, wenn Josh
+  den Schlüssel auf dem Server eingetragen hat.
+- **Anlegeraufrufe von Kanzleien** („INVESTOR ALERT“, „class action“, „lead plaintiff“) werden erkannt
+  und weder bewertet noch gemessen: 164 von 789 Überschriften in den Protokollen bis 24.11., keine davon
+  eine Meldung der Firma. Eine Firma, die über ihren eigenen Prozess berichtet (Vergleich, Urteil), bleibt.
+- **Abgeschaltet:** Alpacas Nachrichtenstrom (in den nachverfolgten Fällen 4 bis 30 Stunden zu spät, rund
+  jede siebte Meldung zur falschen Firma), die alte Regel mit Kursbestätigung, die Finnhub-Nachrichten
+  (13 bis 14 Minuten nach der Veröffentlichung).
+
+**Mitbewertung.** Haiku 5.5 und Sonnet 5.5 bewerten jede Meldung des Sofort-Einstiegs mit demselben Text
+und Vorwissen (`fast_shadow`). Sie entscheiden nichts. Die Wochenstatistik zeigt, wie oft sie mit Opus
+übereinstimmen und wie oft ihre eigene Richtung stimmte.
+
+**Kosten.** Kein Abo. Für die KI geschätzt 3 bis 6 $ pro Handelstag statt rund 2,50 $, weil die
+SEC-Meldungen dazukommen (rund 110 bis 150 am Tag vor den Filtern nach Umsatz und Kurs). Jede Probe kostet
+die Spanne auf 1 Aktie, also Cent-Beträge; sie steht nicht in `trades.jsonl`, aber im Depotwert.
+
+**Erwartung.** Ein bis zwei handelbare Fälle am Tag mit enger Spanne, nicht viele. Ob die KI die Richtung
+oft genug trifft, ist offen (bis 24.11.: 26 Bewertungen mit Richtung, 10 davon gemessen, 5 richtig,
+1 falsch, 4 ohne Bewegung). Die Wochenstatistik trennt deshalb nach Pressemitteilung und SEC-Meldung und
+nach Art der Meldung. Maßstab aus der dritten Auswertung: Vor und nach der Börse muss die Richtung in etwa
+zwei von drei Fällen stimmen, in der Handelszeit in jedem zweiten.
+
+**Offener Punkt für Josh (nicht umgesetzt, wäre eine neue Regel):** Der engste Stop liegt bei 0,45 % (kleine
+Wirkung, ruhige Aktie), die erlaubte Spanne bei 0,5 %. In diesem Fall liegt der Stop innerhalb der Spanne und
+kann sofort auslösen. Bei mittlerer Schwankung sind es 0,75 % (Wirkung 1) und 1,5 % (Wirkung 2). Vorschlag:
+kein Einstieg, wenn die gesehene Spanne größer ist als der halbe Abstand zum Stop. Zweitens: Business Wire
+kommt im Median 334 Sekunden nach der Veröffentlichung an, das Höchstalter ist 300 Sekunden; mehr als die
+Hälfte seiner Meldungen wird deshalb gar nicht bewertet (`fast_skipped`, `stale`).
+
+**Was die ersten Tage zeigen müssen** (am echten Konto noch nie gelaufen):
+
+- die Probe: Dauer (geschätzt 1 bis 3 Sekunden), ob beide Seiten ausgeführt werden, auch beim Leerverkauf
+  (`fast_probe`);
+- der Sofort-Einstieg in der Handelszeit mit Stop und Ziel beim Broker;
+- der Abruf des Textes der Pflichtmitteilungen (`fast_skipped` mit `no_text` zeigt, wo er fehlt) und wie
+  schnell die Liste wirklich ist (Wochenstatistik, Quelle `sec`);
+- weiter offen aus der ersten Fassung: Ziel-Order und ihr Streichen, Ausstieg bei Stop und Zeitlimit.
+
+**Was folgt** (Rest der Stufe 0, noch nicht gebaut): abendliche Prüfung jeder Ausführung gegen den echten
+Umsatz; Dossier mit den Erwartungen für das nächste Quartal und das Jahr (Alpha Vantage, sobald der
+Schlüssel da ist und `tools/alphavantage_check.py` zeigt, dass das kostenlose Konto sie liefert), der
+erwarteten Bewegung aus Optionspreisen und der früheren Prognose der Firma; Zahlenvergleich im Code;
+zweiter Weg zu den SEC-Meldungen. Stufe 1 (Interactive Brokers als Datenquelle, rund 40 $ im Monat und
+500 $ Guthaben) erst, wenn Josh dort ein Konto hat und Stufe 0 zwei Wochen gemessen ist.
+
 ## Bekannte Schwächen des Tests
 
 - **Papertrading füllt Orders zu günstig aus.** Echte Kursrutscher bei Nachrichten bildet
-  die Simulation nicht ab. Gute Paper-Ergebnisse sind deshalb eine Obergrenze.
+  die Simulation nicht ab. Gute Paper-Ergebnisse sind deshalb eine Obergrenze. Das gilt auch für die
+  Probe mit 1 Aktie: Sie zeigt Geld- und Briefkurs, aber nicht, ob 10.000 $ zu diesem Kurs zu haben
+  wären. Die abendliche Prüfung jeder Ausführung gegen den echten Umsatz fehlt noch.
 - **Kursdaten kommen nur von der Börse IEX** (kostenlose Stufe), ein kleiner Ausschnitt des
   Marktes. Volumen und Geld-/Brief-Kurse sind dadurch ungenau. Gemessen am 16.11.: 3 bis 5 %
   des Umsatzes; die Eröffnungsspanne ist bei 19 von 25 Aktien an mindestens einer Kante um
@@ -635,4 +746,13 @@ Kurs. Die SEC-Liste lief ab 22:07 Uhr wieder.
 - 2026-11-23: GlobeNewswire weist den Server ab (403 bei jedem Abruf seit 0:07 UTC, auch mit Accept-Kopf
   und zehn Minuten Pause). Aus der Feed-Liste genommen; nicht umgangen. Business Wire, PR Newswire und
   Finnhub laufen.
-
+- 2026-11-24 (Freigabe Josh, aktiv ab dem Neustart am Abend): zweite Fassung des Sofort-Einstiegs und
+  Stufe 0 des Vorschlags `reports/2026-11-24-vorschlag-zielsetup.md`. Blick auf Geld- und Briefkurs vor
+  jedem Einstieg (Kursquelle oder Probe mit 1 Aktie), Einstieg nur bei einer Spanne bis 0,5 %;
+  Sofort-Einstieg auch in der Handelszeit, die alte Regel mit Kursbestätigung und Alpacas Nachrichtenstrom
+  sind abgeschaltet. SEC-Liste alle 2 Sekunden, frische Pflichtmitteilungen ohne Quartalszahlen werden
+  gelesen und bewertet, aber noch nicht gehandelt (Joshs Entscheidung dazu steht aus). WireAlpha als
+  gemessene Quelle und Ablage für die Schlüssel von WireAlpha und Alpha Vantage (`deploy/set-keys.sh`).
+  Kanzlei-Aufrufe werden nicht mehr bewertet. Haiku und Sonnet bewerten beim Sofort-Einstieg mit.
+  Finnhub-Nachrichten aus. RTPR ist verworfen: Seine Bedingungen verbieten die Nutzung in einem Handels-Bot.
+  Einzelheiten im Abschnitt „Zweite Fassung im Handel“.
