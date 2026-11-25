@@ -12,6 +12,7 @@ EnvironmentFile=-/etc/trading-bot/llm.env
 EnvironmentFile=-/etc/trading-bot/sec.env
 EnvironmentFile=-/etc/trading-bot/finnhub.env
 EnvironmentFile=-/etc/trading-bot/wirealpha.env
+EnvironmentFile=-/etc/trading-bot/alphavantage.env
 Environment=BOT_DATA_DIR=/var/lib/trading-bot
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/trading-agent/.venv/bin/python -m bot.main

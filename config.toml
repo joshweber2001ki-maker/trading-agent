@@ -219,6 +219,17 @@ market_every_s = 20      # die Marktnachrichten so oft
 company_every_s = 120    # jede berichtende Firma so oft
 max_companies  = 40
 
+[alphavantage]
+# Was Analysten für die kommenden Quartale und das Jahr erwarten (Alpha Vantage, kostenloses Konto: 25
+# Abfragen am Tag, eine je Sekunde). Finnhub nennt nur das Quartal, das gerade berichtet wird; an diesen
+# Zahlen misst sich dagegen der Ausblick einer Firma. Sie gehen als Vorwissen in die Bewertung.
+# Läuft nur mit Schlüssel auf dem Server: bash deploy/set-keys.sh alphavantage
+enabled         = true
+per_day         = 24     # höchstens so viele Abfragen am Tag (eine bleibt für tools/alphavantage_check.py)
+reserve_per_day = 8      # davon zurückgehalten für Meldungen des Tages, die vom Ausblick einer Firma handeln;
+                         # der Rest fragt im Voraus die Firmen ab, die heute und morgen berichten, die meistgehandelten zuerst
+ttl_days        = 7      # so lange gilt eine Antwort (sie wird auch über einen Neustart behalten)
+
 [wirealpha]
 # Pressemitteilungen von WireAlpha (kostenlos, verspricht Zustellung in unter einer Sekunde; ungeprüft,
 # junger Anbieter). Jede Meldung steht als wire_item mit der Quelle "wa-<verteiler>" im Protokoll; ob

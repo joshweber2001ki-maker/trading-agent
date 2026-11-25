@@ -8,8 +8,9 @@ being reported, but not of the NEXT quarter and the year, and those decide how a
 outlook is to be read. Alpha Vantage lists such estimates (EARNINGS_ESTIMATES). This shows
 whether the free key gets them, for a large and a mid-sized company, and what they look like.
 
-The free plan allows 25 requests a day; this run uses one per symbol (two by default). The bot
-does not use this key yet. The key is never printed.
+The free plan allows 25 requests a day and one a second; this run uses one per symbol (two by
+default) and waits between them. The bot uses the rest of the day's requests (bot/alphavantage.py).
+The key is never printed.
 """
 import asyncio
 import sys
@@ -19,10 +20,12 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from bot.alphavantage import Refused, read_answer  # noqa: E402
 from bot.common import env  # noqa: E402
 
 URL = "https://www.alphavantage.co/query"
 DEFAULT = ["MSFT", "TTC"]       # a large company and a mid-sized one
+PAUSE_S = 2.0                   # the free key takes one request a second
 
 
 def clean(text, key):
@@ -30,18 +33,24 @@ def clean(text, key):
 
 
 def judge(data):
-    """(ok, text): whether the answer carries estimates, and what else it says."""
+    """(state, text or rows): "ok" with the records, "fast" or "day" for a notice about the limits
+    (one request a second, 25 a day), "none" if the answer carries no estimates."""
     if not isinstance(data, dict):
-        return False, "unerwartete Antwort"
-    for k in ("Information", "Note", "Error Message"):
-        if data.get(k):
-            # the service repeats the key in some of these texts
-            return False, f"{k}: {data[k]}"
-    # documented as a list of records, one per fiscal quarter or year; take it under whatever name it comes
-    rows = next((v for v in data.values() if isinstance(v, list) and v and isinstance(v[0], dict)), None)
+        return "none", "unerwartete Antwort"
+    if data.get("Error Message"):
+        return "none", f"Error Message: {data['Error Message']}"
+    try:
+        rows = read_answer(data)
+    except Refused as e:
+        return ("day" if e.today else "fast"), " ".join(str(data.get(k) or "") for k in ("Information", "Note")).strip()
     if not rows:
-        return False, f"keine Schätzungen, Felder der Antwort: {sorted(data)[:8]}"
-    return True, rows
+        return "none", f"keine Schätzungen, Felder der Antwort: {sorted(data)[:8]}"
+    return "ok", rows
+
+
+async def ask(http, sym, key):
+    r = await http.get(URL, params={"function": "EARNINGS_ESTIMATES", "symbol": sym, "apikey": key})
+    return judge(r.json()) if r.status_code == 200 else ("none", f"Antwort {r.status_code}")
 
 
 async def main(symbols):
@@ -52,15 +61,25 @@ async def main(symbols):
         return 1
     print(f"Alpha-Vantage-Prüfung, Schlüssel mit {len(key)} Zeichen. Das kostenlose Konto erlaubt 25 Abfragen am Tag; "
           f"diese Prüfung braucht {len(symbols)}.")
-    good = 0
+    good, limited = 0, False
     async with httpx.AsyncClient(timeout=20) as http:
-        for sym in symbols:
+        for i, sym in enumerate(symbols):
+            if i:
+                await asyncio.sleep(PAUSE_S)
             try:
-                r = await http.get(URL, params={"function": "EARNINGS_ESTIMATES", "symbol": sym, "apikey": key})
-                ok, res = judge(r.json()) if r.status_code == 200 else (False, f"Antwort {r.status_code}")
+                state, res = await ask(http, sym, key)
+                if state == "fast":                 # "not so fast": once more, a little later
+                    await asyncio.sleep(PAUSE_S * 2)
+                    state, res = await ask(http, sym, key)
             except Exception as e:
-                ok, res = False, clean(repr(e), key)
-            if not ok:
+                state, res = "none", clean(repr(e), key)
+            if state in ("fast", "day"):
+                limited = True
+                print(f"{sym}: nicht abgefragt, der Dienst verweist auf seine Grenze "
+                      + ("von 25 Abfragen am Tag (heute ist sie erreicht)." if state == "day" else "von einer Abfrage je Sekunde.")
+                      + " Das sagt nichts über diese Aktie.")
+                continue
+            if state != "ok":
                 print(f"{sym}: keine Erwartungen. {clean(res, key)}")
                 continue
             good += 1
@@ -71,6 +90,9 @@ async def main(symbols):
                     "revenue_estimate_average", "revenue_estimate_analyst_count") if k in row))
     if good == len(symbols):
         print("Ergebnis: Das kostenlose Konto liefert die Erwartungen für kommende Quartale und das Jahr.")
+    elif limited:
+        print(f"Ergebnis: {good} von {len(symbols)} Aktien abgefragt, der Rest scheiterte an der Grenze des Dienstes, "
+              "nicht an den Daten. Später noch einmal mit nur dieser Aktie prüfen.")
     elif good:
         print("Ergebnis: Erwartungen nur für einen Teil der Aktien. Die Ausgabe oben bitte an Claude weitergeben.")
     else:

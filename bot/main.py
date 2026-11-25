@@ -9,7 +9,8 @@ import time
 import websockets
 
 from .alpaca import Alpaca
-from .common import DATA, ROOT, Journal, env, load_config, log, now, spawn
+from .alphavantage import Estimates
+from .common import DATA, ET, ROOT, Journal, env, load_config, log, now, spawn
 from .edgar import Edgar
 from .executor import Executor
 from .fast import FastStrategy
@@ -79,10 +80,13 @@ class Bot:
         self.fh_news = FinnhubNews(Finnhub(env("FINNHUB_API_KEY", ""), max_per_min=28), self.cfg.get("finnhub_news"),
                                    self.expectations, self.universe, self.on_wire, self.journal,
                                    self.cfg["wires"]["max_age_s"])
+        # What analysts expect of the coming quarters and years (Alpha Vantage, 25 requests a day).
+        self.estimates = Estimates(env("ALPHAVANTAGE_API_KEY", ""), self.cfg.get("alphavantage"), self.journal,
+                                   path=DATA / "state" / "estimates.json")
         self.fast = FastStrategy(
             self.api, self.cfg, self.journal, self.session, self.universe, self.executor, self.llm,
             stats=self.news.stock_stats, expectations=self.expectations, fetch_text=self.wires.fetch_text,
-            shadows=self.shadows,
+            shadows=self.shadows, estimates=self.estimates,
         )
         # Filings with the SEC: every one is logged (measurement); a fresh one is also read and rated.
         self.edgar = Edgar(self.cfg["edgar"], env("SEC_CONTACT", ""), self.universe, self.journal,
@@ -213,6 +217,33 @@ class Bot:
                     log.warning("status not written: %r", e)
             await asyncio.sleep(self.ext.get("poll_s", poll) if self.executor.has_soft() else poll)
 
+    async def reporting_next(self) -> list:
+        """The companies whose results are still to come today or tomorrow and that the immediate
+        entry could trade, the most traded first: for these the analysts' numbers are asked ahead."""
+        today = now().astimezone(ET).date().isoformat()
+        rows = [r for r in self.expectations.rows.values() if (r.get("date") or "") >= today and r.get("symbol") in self.universe.cache]
+        stats = await self.news.stock_stats.get([r["symbol"] for r in rows])
+        fast, keep = self.cfg["fast"], []
+        for r in rows:
+            st = stats.get(r["symbol"])
+            if st and st["price"] >= self.cfg["risk"]["min_price"] and st["dollar_volume"] >= fast["min_dollar_volume"]:
+                keep.append((r["date"], -st["dollar_volume"], r["symbol"]))
+        return [sym for _, _, sym in sorted(keep)]
+
+    async def estimates_loop(self):
+        """Every half hour: ask ahead for the companies that report next, as far as the day's requests reach."""
+        if not self.estimates.available:
+            return
+        log.info("estimates: asking ahead for the companies that report next")
+        while True:
+            try:
+                if self.universe.cache and self.expectations.rows:
+                    await self.estimates.prefetch(await self.reporting_next())
+            except Exception as e:
+                self.errors += 1
+                self.journal.event("error", where="estimates_loop", error=type(e).__name__)
+            await asyncio.sleep(1800 if self.expectations.rows else 60)
+
     def after_close(self):
         """Measurements that need whole-market data, which is free once it is 15 minutes old.
         Each runs once per day (again after a restart; what is already measured is skipped)."""
@@ -238,9 +269,10 @@ class Bot:
             "news": self.news.stats, "wires": self.wires.stats,
             "wire_sources": {**self.wires.by_source, "finnhub": self.fh_news.stats,
                              "wirealpha": {**self.wirealpha.stats, "connected": self.wirealpha.connected}},
-            "edgar": {**self.edgar.stats, "handed_on": self.edgar.handed},
+            "edgar": {**self.edgar.stats, "handed_on": self.edgar.handed, **self.edgar.pace()},
             "fast": self.fast.stats, "fast_enabled": bool(self.cfg["fast"]["enabled"]),
             "expectations": len(self.expectations.rows),
+            "estimates": {**self.estimates.stats, "kept": len(self.estimates.cache), "asked_today": self.estimates.used},
             "orb_stage": self.orb.stage, "orb_pool": len(self.orb.pool), "orb_watching": sorted(self.orb.ranges),
             "open_trades": [
                 {"symbol": t.symbol, "strategy": t.strategy, "side": t.side, "qty": t.qty, "status": t.status}
@@ -301,7 +333,7 @@ class Bot:
             extended=bool(self.ext.get("enabled")), fast=bool(self.cfg["fast"]["enabled"]),
             fast_sessions=self.cfg["fast"]["sessions"], look=bool((self.cfg["fast"].get("look") or {}).get("enabled")),
             sec_rated=bool(self.cfg["edgar"].get("rate")), sec_traded=bool(self.cfg["edgar"].get("trade")),
-            wirealpha=self.wirealpha.active,
+            wirealpha=self.wirealpha.active, estimates=self.estimates.available,
         )
         if self.cfg["fast"]["enabled"]:
             spawn(self.expectations.refresh(force=True))
@@ -359,7 +391,7 @@ class Bot:
         if not self.llm.available:
             log.warning("ANTHROPIC_API_KEY fehlt: Meldungen werden nicht bewertet, also auch nicht gehandelt")
         await asyncio.gather(self.news_loop(), self.control_loop(), self.wires.run(), self.edgar.run(),
-                             self.fh_news.run(), self.wirealpha.run())
+                             self.fh_news.run(), self.wirealpha.run(), self.estimates_loop())
 
 
 def main():

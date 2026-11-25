@@ -26,6 +26,7 @@ being traded at all (`rate_only`), to measure how often the rating is right.
 import asyncio
 from datetime import timedelta
 
+from .alphavantage import OUTLOOK
 from .common import iso, now, parse_ts, spawn
 from .llm import is_noise
 from .news_strategy import trade_plan, vol_factor
@@ -37,10 +38,11 @@ EARLIER_KEEP = 5        # at most this many per stock
 
 class FastStrategy:
     def __init__(self, api, cfg, journal, session, universe, executor, classifier, stats=None,
-                 expectations=None, fetch_text=None, shadows=()):
+                 expectations=None, fetch_text=None, shadows=(), estimates=None):
         self.api, self.journal, self.session, self.universe = api, journal, session, universe
         self.executor, self.llm, self.stock_stats = executor, classifier, stats
         self.expectations, self.fetch_text = expectations, fetch_text
+        self.estimates = estimates      # what analysts expect of the coming quarters and years (may be None)
         self.cfg, self.news_cfg, self.min_price = cfg["fast"], cfg["news"], cfg["risk"]["min_price"]
         # Further models that rate the same announcements for comparison. They decide nothing.
         self.shadows = [c for c in shadows if c.model != classifier.model] if self.cfg.get("shadows") else []
@@ -201,9 +203,15 @@ class FastStrategy:
                 if text:
                     article["text"] = text
         expected = await self.expectations.context(sym) if self.expectations else None
+        # What analysts expect of the coming quarters and the year. Kept for the companies that report
+        # these days; asked for on the spot (briefly) when an announcement speaks of the company's outlook.
+        forward = None
+        if self.estimates:
+            about_outlook = bool(OUTLOOK.search(head + " " + (article.get("text") or article.get("summary") or "")[:2000]))
+            forward = await self.estimates.context(sym, fetch=bool(expected) or about_outlook)
         # What the reader should know beforehand: what kind of source this is, what the bot has
         # already seen of the company, and what analysts expect.
-        context = "\n".join(x for x in (art.get("note"), before, expected) if x) or None
+        context = "\n".join(x for x in (art.get("note"), before, expected, forward) if x) or None
         names = {sym: await self.universe.name(sym)}
         for clf in self.shadows:
             spawn(self._shadow(clf, article, sym, names, st, context, dict(base)))
@@ -219,7 +227,7 @@ class FastStrategy:
                     tokens_out=res["tokens_out"], size=st["size"], daily_range_pct=st["daily_range_pct"],
                     published=iso(published), rated_age_s=round(rated_age, 1),
                     with_text=bool(article.get("text")), with_expectations=bool(expected),
-                    **({"seen_before": True} if before else {}))
+                    **({"seen_before": True} if before else {}), **({"with_estimates": True} if forward else {}))
         # Every rating is logged, traded or not: the evening's price measurement of the same
         # announcement (news_speed) then shows whether the direction was right.
         self.journal.event("fast_rated", **base)

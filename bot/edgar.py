@@ -19,6 +19,7 @@ import json
 import re
 import time
 import xml.etree.ElementTree as ET
+from collections import deque
 from datetime import datetime
 
 import httpx
@@ -136,6 +137,7 @@ class Edgar:
         self.tickers_day = None
         self.stats = {"polls": 0, "filings": 0, "matched": 0, "errors": 0}
         self.handed = 0           # filings handed on to be read today
+        self.took = deque(maxlen=300)   # how long the last quick looks took
 
     @property
     def active(self):
@@ -216,8 +218,15 @@ class Edgar:
         """The quick look: only the newest filings, one small request. Returns how many were logged."""
         if self.seen is None or not self.tickers:
             return await self.collect()     # the first look of a run goes all the way back
+        t0 = time.monotonic()
         entries = await self._page(0, self.cfg.get("fast_count", 40), timeout=self.cfg.get("fast_timeout_s", 6))
+        self.took.append(time.monotonic() - t0)
         return self._take([e for e in entries if e["acc"] not in self.seen])
+
+    def pace(self) -> dict:
+        """How long the quick looks of the last minutes took (seconds): the usual one and the slow ones."""
+        xs = sorted(self.took)
+        return {"looks": len(xs), "median_s": round(xs[len(xs) // 2], 2), "p90_s": round(xs[len(xs) * 9 // 10], 2)} if xs else {}
 
     def article(self, e: dict, sym: str) -> dict:
         """A filing in the shape the immediate entry expects. The headline names the company and
@@ -302,10 +311,12 @@ class Edgar:
             if not ready:
                 await asyncio.sleep(STARTUP_WAIT_S)
             elif quick:
-                # After a failed look wait longer, and longer still while it keeps failing: the list is
-                # sometimes slow or away for hours, and asking more does not help.
+                # One look in twenty gets no answer in time (measured 24. and 25.11.2026) and the next
+                # one does: a single failure costs no waiting. Only when it keeps failing does the bot
+                # ask more rarely, and after a refusal not for a whole interval: the list is sometimes
+                # away for hours, and asking more does not help.
                 quiet = max(1.0, self.cfg["fast_poll_s"])
-                await asyncio.sleep(min(self.cfg["poll_s"], quiet * 5 * 2 ** min(fails - 1, 10)) if fails else quiet)
+                await asyncio.sleep(min(self.cfg["poll_s"], quiet * 5 * 2 ** min(fails - 3, 10)) if fails >= 3 else quiet)
             else:
                 await asyncio.sleep(self.cfg["poll_s"])
 

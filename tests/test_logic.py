@@ -1427,7 +1427,7 @@ def test_bot_starts_lists_filings_and_measures_after_the_close_without_trading(t
         monkeypatch.setattr(mod, "DATA", tmp_path)
     for name, value in (("APCA_API_KEY_ID", "test"), ("APCA_API_SECRET_KEY", "test"), ("SEC_CONTACT", "someone@example.org")):
         monkeypatch.setenv(name, value)
-    for name in ("ANTHROPIC_API_KEY", "APCA_BASE_URL", "APCA_DATA_FEED", "WIREALPHA_API_KEY"):
+    for name in ("ANTHROPIC_API_KEY", "APCA_BASE_URL", "APCA_DATA_FEED", "WIREALPHA_API_KEY", "ALPHAVANTAGE_API_KEY"):
         monkeypatch.delenv(name, raising=False)
 
     monkeypatch.setattr(main_mod, "load_config", lambda: json.loads(json.dumps(OFF)))   # nothing here trades out of hours
@@ -2097,7 +2097,7 @@ def test_a_whole_morning_and_evening_out_of_hours_through_the_running_bot(tmp_pa
     for name, value in (("APCA_API_KEY_ID", "test"), ("APCA_API_SECRET_KEY", "test")):
         monkeypatch.setenv(name, value)
     for name in ("ANTHROPIC_API_KEY", "APCA_BASE_URL", "APCA_DATA_FEED", "SEC_CONTACT", "FINNHUB_API_KEY",
-                 "WIREALPHA_API_KEY"):
+                 "WIREALPHA_API_KEY", "ALPHAVANTAGE_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     real_sleep = asyncio.sleep
 
@@ -2923,7 +2923,7 @@ def test_a_fresh_filing_is_seen_by_the_quick_look_and_handed_on_to_be_read(tmp_p
         e.http.streams = [Stream(503, b"")]
         return art, text, await e.text(entry), entry
     art, text, failed, entry = asyncio.run(go())
-    assert e.http.asked == [(0, 40, 6), (0, 40, 6)]
+    assert e.http.asked == [(0, 40, 6), (0, 40, 6)] and e.pace()["looks"] == 2
     assert handed == [("C2", "GAMMA")] and e.handed == 1                # the hour-old filing is logged, not handed on
     assert (art["id"], art["source"], art["symbols"], art["dedupe_key"]) == ("C2", "sec", ["GAMMA"], "C2")
     assert art["headline"] == "GAMMA & CO files 8-K with the SEC: Entry into a Material Definitive Agreement"
@@ -2982,8 +2982,9 @@ def test_between_two_complete_looks_the_sec_list_is_asked_every_few_seconds(tmp_
         asyncio.run(e.run())
     quick, full = CFG["edgar"]["fast_poll_s"], CFG["edgar"]["poll_s"]
     assert looks == ["complete"] + ["quick"] * 7
-    # slower after a failure, slower still while it keeps failing, and a whole interval of silence after a refusal
-    assert waits == [quick, quick, quick * 5, quick * 10, quick * 20, quick, full, quick]
+    # one or two looks without an answer cost no waiting (one in twenty is slow, the next one is not); only when it
+    # keeps failing does the bot ask more rarely, and after a refusal it is silent for a whole interval
+    assert waits == [quick, quick, quick, quick, quick * 5, quick, full, quick]
     assert e.stats["errors"] == 4
 
 
@@ -3159,3 +3160,176 @@ def test_a_copy_from_a_measured_source_and_a_law_firms_call_are_not_measured_twi
 
     todo = Speed(None, CFG["speed"], j, Uni(), None).todo()
     assert sorted((e["src"], e["symbol"]) for e in todo) == [("prnewswire", "ACME"), ("sec", "DELTA"), ("wa-globenewswire", "BETA")]
+
+
+# ── what analysts expect of the coming quarters and years (Alpha Vantage) ───────────────────
+AV_ROWS = [   # as the service answered for MSFT on 25.11.2026 (numbers come as text), plus quarters long past
+    {"date": "2028-06-30", "horizon": "fiscal year", "eps_estimate_average": "24.2008", "eps_estimate_analyst_count": "33.0000",
+     "revenue_estimate_average": "477761576700.00", "revenue_estimate_analyst_count": "54.00"},
+    {"date": "2027-06-30", "horizon": "fiscal year", "eps_estimate_average": "20.0139", "eps_estimate_analyst_count": "32.0000",
+     "revenue_estimate_average": "395966031800.00", "revenue_estimate_analyst_count": "47.00"},
+    {"date": "2027-03-31", "horizon": "fiscal quarter", "eps_estimate_average": "4.9372", "eps_estimate_analyst_count": "24.0000",
+     "revenue_estimate_average": "99261016600.00", "revenue_estimate_analyst_count": "36.00"},
+    {"date": "2026-12-31", "horizon": "fiscal quarter", "eps_estimate_average": "4.8558", "eps_estimate_analyst_count": "24.0000",
+     "revenue_estimate_average": "96702371680.00", "revenue_estimate_analyst_count": "37.00"},
+    {"date": "2026-09-30", "horizon": "fiscal quarter", "eps_estimate_average": "4.1", "revenue_estimate_average": "90000000000"},
+    {"date": "2026-06-30", "horizon": "fiscal quarter", "eps_estimate_average": "3.9", "revenue_estimate_average": "88000000000"},
+    {"date": "2026-06-30", "horizon": "fiscal year", "eps_estimate_average": "15.5", "revenue_estimate_average": "330000000000"},
+    {"date": "not a date", "horizon": "fiscal quarter", "eps_estimate_average": "1"},
+    {"date": "2027-06-30", "horizon": "fiscal quarter", "eps_estimate_average": None, "revenue_estimate_average": "None"},
+]
+TOO_FAST = {"Information": "Thank you for using Alpha Vantage! Please consider spreading out your free API requests more "
+                           "sparingly (1 request per second). You may subscribe to any of the premium plans to lift the "
+                           "free key rate limit (25 requests per day)."}
+DAY_LIMIT = {"Information": "We have detected your API key and our standard API rate limit is 25 requests per day. "
+                            "Please subscribe to any of the premium plans to instantly remove all daily rate limits."}
+
+
+def test_the_analysts_numbers_for_the_coming_periods_are_put_into_words():
+    from bot.alphavantage import OUTLOOK, Refused, estimates_text, forward_rows, read_answer
+    today = datetime(2026, 11, 25).date()
+    rows = forward_rows(read_answer({"symbol": "MSFT", "estimates": AV_ROWS}), today)
+    # the quarter that ended eight weeks ago may be the one about to be reported; what ended in June is history
+    assert [(r["horizon"], r["date"]) for r in rows] == [
+        ("fiscal quarter", "2026-09-30"), ("fiscal quarter", "2026-12-31"), ("fiscal quarter", "2027-03-31"),
+        ("fiscal year", "2027-06-30"), ("fiscal year", "2028-06-30")]
+    text = estimates_text("MSFT", rows, "2026-11-25T12:00:00Z")
+    assert text.startswith("What analysts expect of MSFT on average, by period (as of 2026-11-25)")
+    assert "- quarter ending 2026-12-31: earnings per share 4.86 (24 analysts), revenue 96.70 billion (37 analysts)" in text
+    assert "- fiscal year ending 2027-06-30: earnings per share 20.01 (32 analysts), revenue 395.97 billion (47 analysts)" in text
+    assert "- quarter ending 2026-09-30: earnings per share 4.10, revenue 90.00 billion" in text and "2026-06-30" not in text
+    assert estimates_text("MSFT", []) == "" and forward_rows(None, today) == [] and read_answer(["x"]) == []
+    for notice, today_gone in ((TOO_FAST, False), (DAY_LIMIT, True)):
+        with pytest.raises(Refused) as e:
+            read_answer(notice)
+        assert e.value.today is today_gone
+    assert OUTLOOK.search("Acme Raises Full-Year Guidance") and OUTLOOK.search("Acme announces preliminary unaudited results")
+    assert not OUTLOOK.search("Acme to Acquire Beta; expects the deal to close in March")
+
+
+def test_the_days_requests_go_first_to_who_reports_next_and_the_key_stays_out_of_the_log(tmp_path, monkeypatch):
+    from bot import alphavantage as av_mod
+    from bot.alphavantage import Estimates
+    clock = {"t": datetime(2026, 11, 25, 12, 0, tzinfo=timezone.utc), "mono": 1000.0}
+    monkeypatch.setattr(av_mod, "now", lambda: clock["t"])
+    monkeypatch.setattr(av_mod.time, "monotonic", lambda: clock["mono"])
+    waits = []
+
+    async def sleep(seconds):
+        waits.append(round(seconds, 1))
+        clock["mono"] += seconds
+    monkeypatch.setattr(av_mod.asyncio, "sleep", sleep)
+
+    class Resp:
+        def __init__(self, data, status=200): self.data, self.status_code = data, status
+        def json(self): return self.data
+
+    class Http:
+        def __init__(self): self.asked, self.answers = [], {}
+        async def get(self, url, params=None):
+            self.asked.append(params["symbol"])
+            assert params["function"] == "EARNINGS_ESTIMATES" and params["apikey"] == "AVSECRETKEY"
+            a = self.answers.get(params["symbol"], {"estimates": AV_ROWS})
+            if isinstance(a, list):
+                a = a.pop(0)
+            if isinstance(a, Exception):
+                raise a
+            return Resp(a)
+
+    cfg = {"enabled": True, "per_day": 6, "reserve_per_day": 2, "ttl_days": 7}
+    j = Journal(tmp_path)
+    path = tmp_path / "state" / "estimates.json"
+
+    def make():
+        e = Estimates("AVSECRETKEY", cfg, j, path)
+        e.http = Http()
+        return e
+    e = make()
+    assert e.available and not Estimates("", cfg, j, path).available and not Estimates("k", {"enabled": False}, j, path).available
+    e.http.answers = {"SMALL": {"symbol": "SMALL", "estimates": []},                      # a company nobody covers
+                      "BUSY": [TOO_FAST, {"estimates": AV_ROWS}],                          # "not so fast": once more
+                      "DOWN": RuntimeError("GET https://www.alphavantage.co/query?apikey=AVSECRETKEY failed")}
+
+    async def go():
+        out = {}
+        out["ahead"] = await e.prefetch(["AAA", "SMALL", "BUSY", "CCC", "DDD"])           # 6 a day, 2 held back: 4 requests
+        out["asked_ahead"], out["left"] = list(e.http.asked), (e.left(), e.left(e.reserve))
+        out["kept"] = await e.context("AAA")
+        out["nobody"] = await e.context("SMALL")
+        out["not_asked"] = await e.context("CCC")                                         # no announcement asked for it
+        out["on_the_spot"] = await e.context("CCC", fetch=True)                           # an announcement about its outlook
+        out["down"] = await e.context("DOWN", fetch=True)
+        out["none_left"] = (e.left(), await e.context("DDD", fetch=True))
+        again = make()                                                                    # after a restart: kept, and counted
+        out["after_restart"] = (bool(await again.context("AAA")), again.left(), list(again.http.asked))
+        clock["t"] += timedelta(days=1)
+        out["next_day"] = again.left()
+        again.http.answers = {"EEE": DAY_LIMIT}
+        out["limit"] = (await again.context("EEE", fetch=True), again.left())
+        clock["t"] += timedelta(days=8)
+        out["stale"] = (again.fresh("AAA"), await again.context("AAA"))                   # a week old: not used any more
+        return out
+    out = asyncio.run(go())
+    assert out["ahead"] == 3 and out["asked_ahead"] == ["AAA", "SMALL", "BUSY", "BUSY"] and out["left"] == (2, 0)
+    assert out["kept"].startswith("What analysts expect of AAA") and out["nobody"] is None and out["not_asked"] is None
+    assert out["on_the_spot"].startswith("What analysts expect of CCC") and out["down"] is None
+    assert out["none_left"] == (0, None) and out["after_restart"] == (True, 0, [])
+    assert out["next_day"] == 6 and out["limit"] == (None, 0) and out["stale"] == (False, None)
+    assert all(w in (1.6, 2.0) for w in waits) and waits.count(2.0) == 1                  # a request a second, no faster
+    rows = list(j.recent_events(1))
+    assert [(r["kind"], r.get("where"), r.get("error")) for r in rows] == [("error", "estimates", "RuntimeError"),
+                                                                           ("estimates_limit", None, None)]
+    assert "AVSECRETKEY" not in json.dumps(rows) and "AVSECRETKEY" not in path.read_text()
+
+
+def test_an_announcement_about_the_outlook_is_rated_with_the_analysts_numbers(fast_rig, monkeypatch):
+    api, sess, ex, tmp, clock, events, make, article, fast_mod = fast_rig
+    monkeypatch.setattr(fast_mod, "now", lambda: clock["t"])
+    model = FakeModel("claude-opus-5-5", "none")
+
+    class Est:
+        asked = []
+        async def context(self, sym, fetch=False):
+            self.asked.append((sym, fetch))
+            return "What analysts expect of ACME on average, by period: ..." if fetch else None
+
+    class Exp:
+        async def context(self, sym): return "BETA reports quarterly results today." if sym == "BETA" else None
+    fast = make(model, cfg=FAST_V2, estimates=Est(), expectations=Exp())
+
+    async def go():
+        await fast.on_article(article(1, head="Acme raises full-year guidance"))
+        await fast.on_article(article(2, head="Acme names new finance chief", sym="GAMMA"))
+        await fast.on_article(article(3, head="Beta reports third quarter results", sym="BETA"))
+    asyncio.run(go())
+    assert Est.asked == [("ACME", True), ("GAMMA", False), ("BETA", True)]        # asked on the spot only where it matters
+    assert "What analysts expect of ACME" in model.asked[0]["context"] and model.asked[1]["context"] is None
+    assert model.asked[2]["context"].startswith("BETA reports quarterly results today.\nWhat analysts expect")
+    assert [r.get("with_estimates") for r in events("fast_rated")] == [True, None, True]
+
+
+def test_the_companies_that_report_next_are_asked_for_ahead_the_most_traded_first(tmp_path):
+    from bot.main import Bot
+    b = Bot.__new__(Bot)
+    today = datetime.now(timezone.utc).astimezone(ET).date()
+    day = lambda n: (today + timedelta(days=n)).isoformat()
+
+    class Exp:
+        rows = {"OLD": {"symbol": "OLD", "date": day(-1)}, "BIG": {"symbol": "BIG", "date": day(0)},
+                "MID": {"symbol": "MID", "date": day(0)}, "TINY": {"symbol": "TINY", "date": day(0)},
+                "NEXT": {"symbol": "NEXT", "date": day(1)}, "FOREIGN": {"symbol": "FOREIGN", "date": day(0)},
+                "PENNY": {"symbol": "PENNY", "date": day(0)}}
+
+    class Uni:
+        cache = {s: {} for s in ("OLD", "BIG", "MID", "TINY", "NEXT", "PENNY")}
+
+    class Stats:
+        async def get(self, syms):
+            volume = {"BIG": 9e9, "MID": 5e7, "TINY": 1e6, "NEXT": 9e10, "PENNY": 5e7}
+            return {s: {"price": 2.0 if s == "PENNY" else 50.0, "dollar_volume": volume[s]} for s in syms if s in volume}
+
+    class News:
+        stock_stats = Stats()
+    b.expectations, b.universe, b.news, b.cfg = Exp(), Uni(), News(), CFG
+    # yesterday's report is over; too small, too cheap or not tradable is left out; today before tomorrow
+    assert asyncio.run(b.reporting_next()) == ["BIG", "MID", "NEXT"]

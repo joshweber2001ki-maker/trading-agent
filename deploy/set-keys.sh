@@ -6,8 +6,8 @@
 #                                      this key the next time it starts.
 #   bash deploy/set-keys.sh wirealpha  press releases by push (WireAlpha, measured only). Offers a
 #                                      restart if the bot holds no position.
-#   bash deploy/set-keys.sh alphavantage   estimates for coming quarters (Alpha Vantage). The bot
-#                                      does not use this key yet; only tools/alphavantage_check.py does.
+#   bash deploy/set-keys.sh alphavantage   estimates for coming quarters (Alpha Vantage). Offers a
+#                                      restart if the bot holds no position.
 set -euo pipefail
 CONF="${BOT_CONF_DIR:-/etc/trading-bot}"
 DATA="${BOT_DATA_DIR:-/var/lib/trading-bot}"
@@ -51,8 +51,10 @@ case "${1:-}" in
     if one_key wirealpha.env WIREALPHA_API_KEY "WireAlpha API Key" tools/wirealpha_check.py; then offer_restart; fi
     exit 0 ;;
   alphavantage)
-    one_key alphavantage.env ALPHAVANTAGE_API_KEY "Alpha Vantage API Key" tools/alphavantage_check.py \
-      && echo "Der Bot nutzt diesen Schlüssel noch nicht; die Prüfung zeigt, was er liefert."
+    if one_key alphavantage.env ALPHAVANTAGE_API_KEY "Alpha Vantage API Key" tools/alphavantage_check.py; then
+      echo "Die Prüfung braucht 2 der 25 Abfragen am Tag; der Bot nutzt die übrigen."
+      offer_restart
+    fi
     exit 0 ;;
   "") ;;
   *) echo "Unbekannt: $1. Möglich: finnhub, wirealpha, alphavantage, oder ohne Angabe für Alpaca und Anthropic."; exit 1 ;;

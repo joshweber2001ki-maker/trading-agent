@@ -1,6 +1,6 @@
 # Trading-Bot (Alpaca Paper-Trading)
 
-Stand: 2026-11-24. Zweck: kurzfristigen Handel nach Unternehmensmeldungen mit großen
+Stand: 2026-11-25. Zweck: kurzfristigen Handel nach Unternehmensmeldungen mit großen
 Positionen im **Paper-Konto** testen. Schwerpunkt seit dem 24.11.2026 (Entscheidung Josh): Meldungen
 OHNE Quartalszahlen (Übernahmen, Verträge, Kapitalerhöhungen, Personalien), sofort nach der Meldung,
 vor, in und nach der Handelszeit. Abgeschaltet, der Code bleibt im Repo: der Ausbruch aus der
@@ -29,6 +29,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/first.py` | dieselbe Nachricht aus mehreren Quellen: nur die erste wird bewertet und gehandelt, jede spätere Kopie protokolliert (`news_dup`, mit Verspätung) |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
 | `bot/finnhub.py` | Berichtstermine und Analystenerwartungen (Gewinn je Aktie, Umsatz, letzte Quartale) von Finnhub, kostenloses Konto; geht als Vorwissen in die Bewertung des Sofort-Einstiegs |
+| `bot/alphavantage.py` | Erwartungen der Analysten für die kommenden Quartale und das Jahr (Alpha Vantage, kostenloses Konto: 25 Abfragen am Tag, eine je Sekunde). Im Voraus für die Firmen, die heute und morgen berichten (meistgehandelte zuerst), auf der Stelle für Meldungen, die vom Ausblick einer Firma handeln; eine Antwort gilt eine Woche und übersteht Neustarts (`[alphavantage]`). Geht als Vorwissen in die Bewertung |
 | `bot/feedview.py` | Messung alle fünf Minuten: bei wie vielen Aktien die Kursquelle des Bots einen brauchbaren Kurs zeigt (`feed_view`); kein Handel |
 | `bot/speed.py` | Tempo-Messung nach Börsenschluss: Kursverlauf im Sekundentakt nach jeder Meldung; kein Handel |
 | `tools/check.py` | Verbindungstest |
@@ -41,7 +42,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `tools/ext_check.py` | zeigt, was der Bot vor und nach der Börse vom Markt sieht: Handelszeiten laut Broker, Alter der Kurse, Spanne (nur lesend, braucht Alpaca-Schlüssel) |
 | `tools/fast_check.py` | Trockenlauf des Sofort-Einstiegs an den neuesten echten Pressemitteilungen, mit `sec` an den neuesten SEC-Meldungen: Text, Erwartungen, Bewertung, Kurs vor der Meldung, die Order, die er senden WÜRDE. Sendet keine Order, auch keine Probe (braucht alle Schlüssel, kostet ein paar Cent) |
 | `tools/wirealpha_check.py` | zeigt, was der WireAlpha-Schlüssel liefert: neueste Meldungen, dann 90 Sekunden Strom mit Quellen und Verspätung (nur lesend) |
-| `tools/alphavantage_check.py` | zeigt, ob der kostenlose Alpha-Vantage-Schlüssel die Erwartungen für kommende Quartale und das Jahr liefert (2 der 25 Abfragen am Tag). Der Bot nutzt diesen Schlüssel noch nicht |
+| `tools/alphavantage_check.py` | zeigt, ob der kostenlose Alpha-Vantage-Schlüssel die Erwartungen für kommende Quartale und das Jahr liefert (2 der 25 Abfragen am Tag; mit einem Kürzel als Argument nur diese Aktie). Geprüft am 25.11.2026: Er liefert sie |
 | `tools/price_check.py` | vergleicht Kursquellen in diesem Moment: Alpacas kostenlose Quelle gegen Finnhub (Abfrage und Strom); nur lesend |
 | `tools/price_probe.py` | **handelt**: kauft 1 Aktie im Paper-Konto, beobachtet eine Minute den Kurs der Position laut Broker und verkauft wieder. Zeigt, ob das Paper-Konto vor und nach der Börse den echten Kurs kennt. Nur von Josh von Hand zu starten |
 | `tools/finnhub_check.py` | zeigt, was der Finnhub-Schlüssel liefert: Erwartungen im Ergebniskalender, gesperrte Daten (braucht den Finnhub-Schlüssel) |
@@ -55,12 +56,12 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 
 - **Keine Zugangsdaten und keine persönlichen Daten ins Repo.** Schlüssel liegen nur auf dem
   Server unter `/etc/trading-bot/` (eintragen mit `deploy/set-keys.sh`; weitere Schlüssel mit
-  `deploy/set-keys.sh finnhub`, `wirealpha` oder `alphavantage`; das startet den Bot nicht neu, nur bei
-  WireAlpha wird ein Neustart angeboten, wenn keine Position offen ist), ebenso Joshs
+  `deploy/set-keys.sh finnhub`, `wirealpha` oder `alphavantage`; das startet den Bot nicht neu, bei
+  WireAlpha und Alpha Vantage wird ein Neustart angeboten, wenn keine Position offen ist), ebenso Joshs
   Kontaktadresse für Abfragen bei der SEC (`sec.env`, `SEC_CONTACT=...`). Werkzeuge, die
   Schlüssel brauchen, laufen auf dem Server: `bash deploy/run-tool.sh tools/<datei>.py ...`. In der Git-Historie stehen noch alte, öffentliche
   Paper-Keys; sie gelten als kompromittiert. Der WireAlpha-Schlüssel ist Teil der Adresse der
-  Verbindung: nie eine Adresse oder Fehlermeldung mit ihm protokollieren.
+  Verbindung, der von Alpha Vantage Teil jeder Abfrage: nie eine Adresse oder Fehlermeldung mit ihnen protokollieren.
 - **Strategieänderungen erst vorschlagen, dann umsetzen.** Josh will Änderungen an
   `config.toml` oder an der Handelslogik vorher sehen und freigeben. Fehlerbehebungen ohne
   Einfluss auf die Strategie sind in Ordnung.
@@ -125,21 +126,22 @@ und man muss den Text lesen, um die Richtung zu erkennen (Zahlen: `memory/strate
   Zeit Angenommenes erst um 6:00 Uhr am nächsten Morgen.
 - **Vorwissen für die KI:** zu jeder Meldung, was der Bot in den letzten drei Tagen schon von derselben Firma
   gesehen hat (eine Pflichtmitteilung wiederholt oft eine Pressemitteilung), bei Pflichtmitteilungen der
-  Hinweis darauf, bei Berichten die Erwartungen der Analysten.
+  Hinweis darauf, bei Berichten die Erwartungen der Analysten für das berichtete Quartal (Finnhub) und, seit
+  25.11., für die kommenden Quartale und das Jahr (Alpha Vantage; auch bei Meldungen über den Ausblick).
 - **Nur zum Vergleich:** Haiku und Sonnet bewerten jede Meldung des Sofort-Einstiegs mit (`fast_shadow`),
   ohne Einfluss auf den Handel. Die SEC-Meldungen, die WireAlpha liefert, werden nur gemessen.
 - **Abgeschaltet:** die alte Regel mit Kursbestätigung, Alpacas Nachrichtenstrom (`[news] stream = false`;
   Stunden verspätet, jede siebte Meldung zur falschen Firma) und die Finnhub-Nachrichten.
 
 **Was noch fehlt**
-- Josh legt die Konten bei WireAlpha und Alpha Vantage an und trägt die Schlüssel auf dem Server ein:
-  `bash /opt/trading-agent/deploy/set-keys.sh wirealpha` und `... alphavantage`, danach die Prüfwerkzeuge.
-  WireAlpha ist am echten Dienst ungeprüft: nach dem ersten Tag `wirealpha_sample`, `wire_item` mit `wa-…`
+- Der Schlüssel von Alpha Vantage liegt seit 25.11. auf dem Server. Der von WireAlpha fehlt noch: Josh legt
+  das Konto an und trägt ihn ein (`bash /opt/trading-agent/deploy/set-keys.sh wirealpha`, danach
+  `bash deploy/run-tool.sh tools/wirealpha_check.py`). WireAlpha ist am echten Dienst ungeprüft: nach dem ersten Tag `wirealpha_sample`, `wire_item` mit `wa-…`
   und die Zuordnung zum Börsenkürzel ansehen.
 - Abendliche Prüfung jeder Ausführung gegen den echten Umsatz (das Paper-Konto prüft die Ordergröße nicht
   gegen die verfügbare Menge; die Probe mit 1 Aktie zeigt den Kurs, nicht die Tiefe).
-- Dossier über die Erwartungen hinaus (Alpha Vantage: nächstes Quartal und Jahr; erwartete Bewegung aus
-  Optionspreisen; frühere Prognose der Firma) und der Zahlenvergleich im Code statt durch die KI.
+- Rest des Dossiers: erwartete Bewegung aus Optionspreisen, frühere Prognose der Firma, und der
+  Zahlenvergleich im Code statt durch die KI.
 - Zweiter Weg zu den SEC-Meldungen (die Liste gab am 19.11. einen Tag lang keine Antwort).
 - Zwei offene Punkte für Josh aus der Prüfung des Umbaus (`memory/strategy.md`, „Offener Punkt für Josh“):
   Der engste Stop (0,45 %) liegt innerhalb der erlaubten Spanne (0,5 %); Business Wire kommt meist später
@@ -167,7 +169,10 @@ aus (`tools/weekly_stats.py`, „mitbewertet von …“). Welches Modell entsche
 
 ## Protokolle lesen
 
-- `logs/status.json` – Lebenszeichen des Bots (jede Minute neu, stündlich hochgeladen)
+- `logs/status.json` – Lebenszeichen des Bots (jede Minute neu, stündlich hochgeladen); darin unter
+  `edgar` auch, wie lange die Abfragen der SEC-Liste dauern (`median_s`, `p90_s`), unter `estimates`, wie
+  viele Abfragen bei Alpha Vantage heute verbraucht sind (`asked_today`) und für wie viele Firmen Zahlen
+  vorliegen (`kept`)
 - `logs/trades.jsonl` – ein Eintrag je abgeschlossenem Trade
 - `logs/events-JJJJ-MM-TT.jsonl` – alle Entscheidungen: jede zugeordnete Pressemitteilung mit
   Veröffentlichungszeit (`wire_item`; `alert: true` = Anlegeraufruf einer Kanzlei, weder bewertet noch
@@ -182,7 +187,8 @@ aus (`tools/weekly_stats.py`, „mitbewertet von …“). Welches Modell entsche
   Sitzungsende (`session_end`); alle fünf Minuten, wie viel die Kursquelle zeigt (`feed_view`:
   je Gruppe `n` Aktien, davon `seeing` mit brauchbarem Kurs); vom Sofort-Einstieg jede Bewertung
   (`fast_rated`, auch ohne Trade; `source: sec` = Pflichtmitteilung, `article` ist dann ihre
-  Zugangsnummer; `seen_before` = die KI bekam frühere Meldungen derselben Firma als Vorwissen; mit `news_speed` derselben Meldung zeigt sich, ob die Richtung stimmte), die Bewertung
+  Zugangsnummer; `seen_before` = die KI bekam frühere Meldungen derselben Firma als Vorwissen, `with_estimates` = die
+  Erwartungen für die kommenden Quartale und das Jahr; mit `news_speed` derselben Meldung zeigt sich, ob die Richtung stimmte), die Bewertung
   derselben Meldung durch die mitlaufenden Modelle (`fast_shadow`), nicht bewertete Meldungen mit Grund
   (`fast_skipped`; `no_text` = Text der Pflichtmitteilung nicht abrufbar), Kandidaten ohne Einstieg mit Grund
   (`fast_rejected`: `too_old`, `no_reference`, `max_open_strategy`, `entry_refused`; `source_off` = Quelle

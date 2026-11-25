@@ -629,6 +629,18 @@ gesamten Markt eng. Eine weite sagt nichts, deshalb entscheidet dann die Probe.
   jede siebte Meldung zur falschen Firma), die alte Regel mit Kursbestätigung, die Finnhub-Nachrichten
   (13 bis 14 Minuten nach der Veröffentlichung).
 
+- **Erwartungen für die kommenden Quartale und das Jahr (seit 25.11.2026, Alpha Vantage).** Finnhub nennt
+  kostenlos nur die Erwartungen für das Quartal, das gerade berichtet wird. Ob der Ausblick einer Firma
+  überrascht, hängt aber an dem, was Analysten für das NÄCHSTE Quartal und das Jahr erwarten. Die liefert
+  Alpha Vantage mit dem kostenlosen Schlüssel (am 25.11. auf dem Server geprüft: für Microsoft die
+  Quartale bis März 2027 und die Geschäftsjahre bis Juni 2028, jeweils Gewinn je Aktie, Umsatz und Zahl
+  der Analysten). Grenzen: 25 Abfragen am Tag, eine je Sekunde, eine Abfrage je Firma. Der Bot nutzt
+  24: 16 im Voraus für die Firmen, die heute und morgen berichten und die er handeln kann (die
+  meistgehandelten zuerst), 8 zurückgehalten für Meldungen des Tages, in denen es um den Ausblick geht
+  („guidance“, „outlook“, vorläufige Zahlen); dort fragt er auf der Stelle und wartet höchstens 1,2
+  Sekunden. Eine Antwort gilt eine Woche und übersteht Neustarts. In Wochen mit über hundert Berichten am
+  Tag reicht das nur für die größten Firmen. Die Quelle hinter den Zahlen nennt Alpha Vantage nicht.
+
 **Mitbewertung.** Haiku 5.5 und Sonnet 5.5 bewerten jede Meldung des Sofort-Einstiegs mit demselben Text
 und Vorwissen (`fast_shadow`). Sie entscheiden nichts. Die Wochenstatistik zeigt, wie oft sie mit Opus
 übereinstimmen und wie oft ihre eigene Richtung stimmte.
@@ -662,10 +674,8 @@ Hälfte seiner Meldungen wird deshalb gar nicht bewertet (`fast_skipped`, `stale
 - weiter offen aus der ersten Fassung: Ziel-Order und ihr Streichen, Ausstieg bei Stop und Zeitlimit.
 
 **Was folgt** (Rest der Stufe 0, noch nicht gebaut): abendliche Prüfung jeder Ausführung gegen den echten
-Umsatz; Dossier mit den Erwartungen für das nächste Quartal und das Jahr (Alpha Vantage, sobald der
-Schlüssel da ist und `tools/alphavantage_check.py` zeigt, dass das kostenlose Konto sie liefert), der
-erwarteten Bewegung aus Optionspreisen und der früheren Prognose der Firma; Zahlenvergleich im Code;
-zweiter Weg zu den SEC-Meldungen. Stufe 1 (Interactive Brokers als Datenquelle, rund 40 $ im Monat und
+Umsatz; vom Dossier noch die erwartete Bewegung aus Optionspreisen und die frühere Prognose der Firma;
+Zahlenvergleich im Code; zweiter Weg zu den SEC-Meldungen. Stufe 1 (Interactive Brokers als Datenquelle, rund 40 $ im Monat und
 500 $ Guthaben) erst, wenn Josh dort ein Konto hat und Stufe 0 zwei Wochen gemessen ist.
 
 ## Bekannte Schwächen des Tests
@@ -769,3 +779,14 @@ zweiter Weg zu den SEC-Meldungen. Stufe 1 (Interactive Brokers als Datenquelle, 
   Kanzlei-Aufrufe werden nicht mehr bewertet. Haiku und Sonnet bewerten beim Sofort-Einstieg mit.
   Finnhub-Nachrichten aus. RTPR ist verworfen: Seine Bedingungen verbieten die Nutzung in einem Handels-Bot.
   Einzelheiten im Abschnitt „Zweite Fassung im Handel“.
+- 2026-11-24, Abend (Entscheidung Josh: „alles direkt handeln, kein voriges Messen“): SEC-Meldungen und
+  die vier Verteiler über WireAlpha werden gehandelt statt nur gemessen. Erster Abend der zweiten Fassung:
+  Neustart um 22:07 Uhr, ein Trade (Dell nach Quartalszahlen über Business Wire: Probe in 0,89 Sekunden,
+  Spanne 0,23 %, Ausstieg am Zeitlimit, −35,64 $), eine Ablehnung wegen der Spanne (Centuri, 2,9 %). Die
+  SEC-Liste zeigte Meldungen im Median 55 Sekunden nach der Annahme; 45 gelesen und bewertet, keine über
+  den Schwellen.
+- 2026-11-25 (Rest der Stufe 0, ohne neue Handelsregel): Erwartungen der Analysten für die kommenden
+  Quartale und das Jahr von Alpha Vantage als Vorwissen der Bewertung. SEC-Liste: Ein einzelner Aussetzer
+  (rund jede zwanzigste Abfrage bekommt in 6 Sekunden keine Antwort) kostet keine Wartezeit mehr, erst
+  ab dem dritten in Folge fragt der Bot seltener.
+
