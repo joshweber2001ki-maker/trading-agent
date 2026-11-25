@@ -1,5 +1,5 @@
 {
- "t": "2026-11-25T05:07:04Z",
+ "t": "2026-11-25T06:07:07Z",
  "version": "5976c0bf84abe52e5db98c835e5ae6dd69b4aa93",
  "day": "2026-11-25",
  "trading_day": true,
@@ -13,26 +13,26 @@
   "claude-sonnet-5-5": 0
  },
  "news": {
-  "received": 0,
+  "received": 1,
   "classified": 0,
   "candidates": 0
  },
  "wires": {
-  "polls": 175,
-  "items": 8,
-  "matched": 0,
+  "polls": 1669,
+  "items": 14,
+  "matched": 1,
   "errors": 0
  },
  "wire_sources": {
   "prnewswire": {
-   "polls": 105,
-   "items": 8,
-   "matched": 0,
+   "polls": 1000,
+   "items": 13,
+   "matched": 1,
    "errors": 0
   },
   "businesswire": {
-   "polls": 70,
-   "items": 0,
+   "polls": 669,
+   "items": 1,
    "matched": 0,
    "errors": 0
   },
