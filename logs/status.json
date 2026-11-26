@@ -1,5 +1,5 @@
 {
- "t": "2026-11-26T14:06:16Z",
+ "t": "2026-11-26T15:06:18Z",
  "version": "1eabed9ece1fef581ee7639f040b1b858ac5df69",
  "day": "2026-11-26",
  "trading_day": false,
@@ -13,26 +13,26 @@
   "claude-sonnet-5-5": 0
  },
  "news": {
-  "received": 68,
+  "received": 69,
   "classified": 0,
   "candidates": 0
  },
  "wires": {
-  "polls": 4468,
-  "items": 458,
-  "matched": 72,
+  "polls": 5966,
+  "items": 489,
+  "matched": 93,
   "errors": 0
  },
  "wire_sources": {
   "prnewswire": {
-   "polls": 2681,
-   "items": 236,
-   "matched": 42,
+   "polls": 3580,
+   "items": 263,
+   "matched": 63,
    "errors": 0
   },
   "businesswire": {
-   "polls": 1787,
-   "items": 222,
+   "polls": 2386,
+   "items": 226,
    "matched": 30,
    "errors": 0
   },
@@ -46,19 +46,19 @@
    "messages": 0,
    "items": 0,
    "matched": 0,
-   "errors": 43,
+   "errors": 55,
    "connected": false
   }
  },
  "edgar": {
-  "polls": 3488,
+  "polls": 4583,
   "filings": 14,
   "matched": 0,
-  "errors": 196,
+  "errors": 274,
   "handed_on": 0,
   "looks": 300,
   "median_s": 0.2,
-  "p90_s": 2.36
+  "p90_s": 2.06
  },
  "fast": {
   "received": 0,
