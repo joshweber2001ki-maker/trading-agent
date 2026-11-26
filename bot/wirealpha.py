@@ -14,6 +14,10 @@ the ordinary interface (`body`); if that fails, the headline is rated by itself.
 The key comes from the environment (WIREALPHA_API_KEY) and is stored only on the server. It is
 part of the stream's address, so no address is ever logged.
 
+The addresses come from `[wirealpha]` (api, stream, article, auth, stream_auth): the service's
+documentation named addresses that its server did not know when the first key was tried on
+26.11.2026, and `tools/wirealpha_check.py` finds the ones that work.
+
 Message format as documented on 24.11.2026: after {"action": "subscribe", "tickers": ["*"]} the
 server sends {"type": "article", "data": {"id", "title", "source", "tickers", "published_at", ...},
 "timestamp": ...}; tickers are plain strings in the stream and {"ticker", "exchange"} objects in the
@@ -31,8 +35,40 @@ import websockets
 
 from .common import iso, log, now, parse_ts, spawn
 
-STREAM = "wss://api.wirealpha.com/v1/ws"
-ARTICLE = "https://api.wirealpha.com/v1/articles/"
+API = "https://api.wirealpha.com"
+STREAM = "/v1/ws?apiKey={key}"      # as documented; {key} is replaced by the key
+ARTICLE = "/v1/articles/{id}"
+SUBSCRIBE = {"action": "subscribe", "tickers": ["*"]}
+
+
+def auth(style: str, key: str):
+    """How the key travels with a request: (headers, query parameters).
+    style: "bearer", "header:<Name>" (for example header:X-API-Key), "query:<name>" or "none"."""
+    style = (style or "none").strip()
+    if style.lower() == "bearer":
+        return {"Authorization": f"Bearer {key}"}, {}
+    if style.lower() == "x-api-key":
+        return {"X-API-Key": key}, {}
+    kind, _, name = style.partition(":")
+    if kind.lower() == "header" and name:
+        return {name: key}, {}
+    if kind.lower() == "query" and name:
+        return {}, {name: key}
+    return {}, {}
+
+
+def stream_address(cfg: dict, key: str):
+    """(address of the stream, headers to send with it). The address may hold the key: never log it."""
+    base = (cfg.get("api") or API).rstrip("/").replace("https://", "wss://").replace("http://", "ws://")
+    headers, _ = auth(cfg.get("stream_auth"), key)
+    return base + (cfg.get("stream") or STREAM).replace("{key}", key), headers
+
+
+def article_address(cfg: dict, key: str, article_id):
+    """(address of one release's full text, headers, query parameters)."""
+    headers, params = auth(cfg.get("auth", "bearer"), key)
+    path = (cfg.get("article") or ARTICLE).replace("{id}", str(article_id)).replace("{key}", key)
+    return (cfg.get("api") or API).rstrip("/") + path, headers, params
 SAMPLES = 5      # the first messages of a day are logged as they came, to check the format against the documentation
 HELD_S = 120     # a connection that lasted this long was a working one
 
@@ -124,7 +160,8 @@ class WireAlpha:
     async def body(self, article_id) -> str:
         """The full text of one release; empty if it cannot be had in time. Never raises."""
         try:
-            r = await self.http.get(ARTICLE + str(article_id), headers={"Authorization": f"Bearer {self.key}"})
+            url, headers, params = article_address(self.cfg, self.key, article_id)
+            r = await self.http.get(url, headers=headers, params=params or None)
             if r.status_code != 200:
                 return ""
             d = r.json()
@@ -152,8 +189,10 @@ class WireAlpha:
         while True:
             started = time.monotonic()
             try:
-                async with websockets.connect(f"{STREAM}?apiKey={self.key}", ping_interval=30, ping_timeout=30) as ws:
-                    await ws.send(json.dumps({"action": "subscribe", "tickers": ["*"]}))
+                url, headers = stream_address(self.cfg, self.key)
+                async with websockets.connect(url, additional_headers=headers or None,
+                                              ping_interval=30, ping_timeout=30) as ws:
+                    await ws.send(json.dumps(SUBSCRIBE))
                     self.connected = True
                     async for raw in ws:
                         self.stats["messages"] += 1

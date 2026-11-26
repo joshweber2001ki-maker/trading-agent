@@ -41,7 +41,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `tools/llm_check.py` | alle eingestellten Modelle drei Beispielmeldungen bewerten lassen: Antwortzeit, Token, Limits (braucht den Anthropic-Schlüssel) |
 | `tools/ext_check.py` | zeigt, was der Bot vor und nach der Börse vom Markt sieht: Handelszeiten laut Broker, Alter der Kurse, Spanne (nur lesend, braucht Alpaca-Schlüssel) |
 | `tools/fast_check.py` | Trockenlauf des Sofort-Einstiegs an den neuesten echten Pressemitteilungen, mit `sec` an den neuesten SEC-Meldungen: Text, Erwartungen, Bewertung, Kurs vor der Meldung, die Order, die er senden WÜRDE. Sendet keine Order, auch keine Probe (braucht alle Schlüssel, kostet ein paar Cent) |
-| `tools/wirealpha_check.py` | zeigt, was der WireAlpha-Schlüssel liefert: neueste Meldungen, dann 90 Sekunden Strom mit Quellen und Verspätung (nur lesend) |
+| `tools/wirealpha_check.py` | zeigt, was der WireAlpha-Schlüssel liefert: neueste Meldungen, dann 90 Sekunden Strom mit Quellen und Verspätung (nur lesend). Antwortet der Dienst an den eingestellten Adressen nicht, sucht es die richtigen (Beschreibung der Schnittstelle des Dienstes, übliche Adressen und Arten, den Schlüssel zu senden) und nennt die Zeilen für `[wirealpha]` |
 | `tools/alphavantage_check.py` | zeigt, ob der kostenlose Alpha-Vantage-Schlüssel die Erwartungen für kommende Quartale und das Jahr liefert (2 der 25 Abfragen am Tag; mit einem Kürzel als Argument nur diese Aktie). Geprüft am 25.11.2026: Er liefert sie |
 | `tools/price_check.py` | vergleicht Kursquellen in diesem Moment: Alpacas kostenlose Quelle gegen Finnhub (Abfrage und Strom); nur lesend |
 | `tools/price_probe.py` | **handelt**: kauft 1 Aktie im Paper-Konto, beobachtet eine Minute den Kurs der Position laut Broker und verkauft wieder. Zeigt, ob das Paper-Konto vor und nach der Börse den echten Kurs kennt. Nur von Josh von Hand zu starten |
@@ -134,9 +134,11 @@ und man muss den Text lesen, um die Richtung zu erkennen (Zahlen: `memory/strate
   Stunden verspätet, jede siebte Meldung zur falschen Firma) und die Finnhub-Nachrichten.
 
 **Was noch fehlt**
-- Der Schlüssel von Alpha Vantage liegt seit 25.11. auf dem Server. Der von WireAlpha fehlt noch: Josh legt
-  das Konto an und trägt ihn ein (`bash /opt/trading-agent/deploy/set-keys.sh wirealpha`, danach
-  `bash deploy/run-tool.sh tools/wirealpha_check.py`). WireAlpha ist am echten Dienst ungeprüft: nach dem ersten Tag `wirealpha_sample`, `wire_item` mit `wa-…`
+- Die Schlüssel von Alpha Vantage (25.11.) und WireAlpha (26.11.) liegen auf dem Server. WireAlpha läuft
+  trotzdem noch nicht: Die Adressen aus seiner Dokumentation kennt sein Server nicht (Abfrage 404, Strom
+  403), und die dort genannten Programmbibliotheken gibt es nicht. Die Adressen sind deshalb in `[wirealpha]`
+  einstellbar; `bash deploy/run-tool.sh tools/wirealpha_check.py` sucht die richtigen. Bis sie eingetragen
+  sind, versucht der Bot alle fünf Minuten vergeblich zu verbinden. WireAlpha ist am echten Dienst ungeprüft: nach dem ersten Tag `wirealpha_sample`, `wire_item` mit `wa-…`
   und die Zuordnung zum Börsenkürzel ansehen.
 - Abendliche Prüfung jeder Ausführung gegen den echten Umsatz (das Paper-Konto prüft die Ordergröße nicht
   gegen die verfügbare Menge; die Probe mit 1 Aktie zeigt den Kurs, nicht die Tiefe).

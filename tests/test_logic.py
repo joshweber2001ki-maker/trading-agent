@@ -3062,13 +3062,20 @@ def test_wirealpha_releases_are_listed_with_their_wire_and_the_key_never_reaches
     class Http:
         answers, asked = [Resp(200, {"data": {"body": "<p>Acme will pay $42 a share.</p><script>x()</script>"}}),
                           Resp(404, {}), Resp(200, ["unexpected"])], []
-        async def get(self, url, headers=None):
-            self.asked.append((url, headers["Authorization"]))
+        async def get(self, url, headers=None, params=None):
+            self.asked.append((url, headers, params))
             return self.answers.pop(0)
     w.http = Http()
     assert got[0]["text_optional"] is True and "text" not in got[0]
     assert [await_none(got[0]["fetch"]()) for _ in range(3)] == ["Acme will pay $42 a share.", "", ""]
-    assert w.http.asked[0] == ("https://api.wirealpha.com/v1/articles/u1", "Bearer wa_live_SECRETKEY")
+    assert w.http.asked[0] == ("https://api.wirealpha.com/v1/articles/u1", {"Authorization": "Bearer wa_live_SECRETKEY"}, None)
+    # the addresses and the way the key is sent can be set: the service's documentation is not reliable
+    from bot.wirealpha import article_address, auth, stream_address
+    other = {"article": "/api/v1/articles/{id}", "auth": "header:X-API-Key", "stream": "/api/v1/ws", "stream_auth": "bearer"}
+    assert article_address(other, "K", "u1") == ("https://api.wirealpha.com/api/v1/articles/u1", {"X-API-Key": "K"}, {})
+    assert stream_address(other, "K") == ("wss://api.wirealpha.com/api/v1/ws", {"Authorization": "Bearer K"})
+    assert stream_address({}, "K") == ("wss://api.wirealpha.com/v1/ws?apiKey=K", {})
+    assert auth("query:apiKey", "K") == ({}, {"apiKey": "K"}) and auth("none", "K") == ({}, {}) and auth(None, "K") == ({}, {})
     with_text = w.take(msg({**data("u9", ["ACME"]), "body": "The text came with the message."}))
     assert with_text["text"] == "The text came with the message." and "fetch" not in with_text
     w._error(RuntimeError("handshake failed for wss://api.wirealpha.com/v1/ws?apiKey=wa_live_SECRETKEY"))

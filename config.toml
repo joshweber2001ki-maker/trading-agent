@@ -242,6 +242,13 @@ sources = ["prnewswire", "businesswire", "globenewswire", "accesswire", "sec_edg
           # sec_edgar: Pflichtmitteilungen, wie WireAlpha sie meldet. Nur gemessen (zeigt, ob WireAlpha sie
           # früher sieht als der Bot selbst); gehandelt werden Pflichtmitteilungen über die Liste der SEC ([edgar])
 text_timeout_s = 3   # so lange auf den vollen Text einer Meldung warten; sonst wird die Überschrift allein bewertet
+# Adressen beim Dienst und wie der Schlüssel mitgeht. Voreingestellt ist, was die Dokumentation nennt; am 26.11.2026
+# kannte der Server diese Adressen nicht (404 und 403). tools/wirealpha_check.py sucht die richtigen und nennt
+# die Zeilen, die hier einzutragen sind:
+#   article     = "/v1/articles/{id}"       voller Text einer Meldung; ohne {id} die Liste der neuesten
+#   auth        = "bearer"                  bearer, header:<Name>, query:<name> oder none
+#   stream      = "/v1/ws?apiKey={key}"     der Strom; {key} wird durch den Schlüssel ersetzt
+#   stream_auth = "none"                    Schlüssel beim Strom zusätzlich als Kopfzeile: none, bearer, header:<Name>
 
 [edgar]
 # Pflichtmitteilungen an die US-Börsenaufsicht SEC (Formular 8-K). Jede wird mitgeschrieben (Messung).
