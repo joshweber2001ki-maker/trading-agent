@@ -1,5 +1,5 @@
 {
- "t": "2026-11-26T06:06:32Z",
+ "t": "2026-11-26T07:06:35Z",
  "version": "a87d014560d2b9ac40bc49703b7d133a6301c949",
  "day": "2026-11-26",
  "trading_day": false,
@@ -18,20 +18,20 @@
   "candidates": 0
  },
  "wires": {
-  "polls": 1658,
-  "items": 15,
+  "polls": 3154,
+  "items": 23,
   "matched": 0,
   "errors": 0
  },
  "wire_sources": {
   "prnewswire": {
-   "polls": 994,
-   "items": 13,
+   "polls": 1891,
+   "items": 21,
    "matched": 0,
    "errors": 0
   },
   "businesswire": {
-   "polls": 664,
+   "polls": 1263,
    "items": 2,
    "matched": 0,
    "errors": 0
