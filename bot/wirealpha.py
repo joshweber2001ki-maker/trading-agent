@@ -14,9 +14,9 @@ the ordinary interface (`body`); if that fails, the headline is rated by itself.
 The key comes from the environment (WIREALPHA_API_KEY) and is stored only on the server. It is
 part of the stream's address, so no address is ever logged.
 
-The addresses come from `[wirealpha]` (api, stream, article, auth, stream_auth): the service's
-documentation named addresses that its server did not know when the first key was tried on
-26.11.2026, and `tools/wirealpha_check.py` finds the ones that work.
+The addresses come from `[wirealpha]` (api, stream, article, auth, stream_auth). The service's
+documentation names addresses under /v1 that its server does not know; `tools/wirealpha_check.py`
+found the ones that work on 26.11.2026 (under /api/v1), and those are the defaults here.
 
 Message format as documented on 24.11.2026: after {"action": "subscribe", "tickers": ["*"]} the
 server sends {"type": "article", "data": {"id", "title", "source", "tickers", "published_at", ...},
@@ -36,8 +36,8 @@ import websockets
 from .common import iso, log, now, parse_ts, spawn
 
 API = "https://api.wirealpha.com"
-STREAM = "/v1/ws?apiKey={key}"      # as documented; {key} is replaced by the key
-ARTICLE = "/v1/articles/{id}"
+STREAM = "/api/v1/ws?apiKey={key}"  # found on 26.11.2026; {key} is replaced by the key
+ARTICLE = "/api/v1/articles/{id}"
 SUBSCRIBE = {"action": "subscribe", "tickers": ["*"]}
 
 
@@ -96,7 +96,7 @@ def to_article(data: dict, universe: dict, sources, max_age_s: int):
     art = {
         "id": f"wa-{src}:{str(data['id'])[-60:]}", "headline": title, "summary": "",
         "created_at": iso(published), "symbols": tickers, "source": f"wa-{src}", "company": "",
-        "max_age_s": max_age_s, "url": "",
+        "max_age_s": max_age_s, "url": str(data.get("url") or ""),
     }
     if data.get("body"):
         art["text"] = str(data["body"])[:12000]

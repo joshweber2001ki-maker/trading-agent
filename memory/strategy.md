@@ -616,7 +616,12 @@ gesamten Markt eng. Eine weite sagt nichts, deshalb entscheidet dann die Probe.
   Überschrift allein). Die SEC-Meldungen von WireAlpha werden nur gemessen, weil der Bot sie selbst von
   der SEC holt. Am echten Dienst geprüft ist nichts davon: Format und Zuordnung zum Börsenkürzel stammen
   aus der Dokumentation; die ersten fünf Nachrichten jedes Tages stehen im Wortlaut im Protokoll
-  (`wirealpha_sample`). Läuft erst, wenn Josh den Schlüssel auf dem Server eingetragen hat.
+  (`wirealpha_sample`). Stand 26.11.2026: Schlüssel eingetragen. Der Server kennt die dokumentierten Adressen
+  nicht, die richtigen liegen unter `/api/v1` und sind eingestellt; Abfrage und Verbindung funktionieren.
+  Zu drei Meldungen von PR Newswire nannte der Dienst selbst eine Verzögerung von 126 Sekunden (der eigene
+  Feed des Bots: 98). Das Versprechen „unter einer Sekunde“ gilt dort also nicht; WireAlpha fragt offenbar
+  dieselben Feeds ab. Sein Nutzen wären GlobeNewswire und AccessWire, die der Bot sonst nicht bekommt.
+  Deren Verzögerung zeigt die Wochenstatistik, sobald Meldungen da sind.
 - **Vorwissen: was der Bot von der Firma schon gesehen hat.** Zu jeder Meldung bekommt die KI die
   Überschriften der Meldungen derselben Firma aus den letzten 72 Stunden (höchstens fünf) mit dem Hinweis,
   dass eine Wiederholung nicht neu ist. Grund: Eine Pflichtmitteilung folgt oft Minuten bis Tage auf die

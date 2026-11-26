@@ -231,8 +231,10 @@ reserve_per_day = 8      # davon zurückgehalten für Meldungen des Tages, die v
 ttl_days        = 7      # so lange gilt eine Antwort (sie wird auch über einen Neustart behalten)
 
 [wirealpha]
-# Pressemitteilungen von WireAlpha (kostenlos, verspricht Zustellung in unter einer Sekunde; ungeprüft,
-# junger Anbieter). Jede Meldung steht als wire_item mit der Quelle "wa-<verteiler>" im Protokoll; ob
+# Pressemitteilungen von WireAlpha (kostenlos, junger Anbieter). Versprochen ist Zustellung in unter einer
+# Sekunde; die eigene Angabe des Dienstes zu drei Meldungen von PR Newswire am 26.11.2026 war 126 Sekunden,
+# also nicht schneller als der Feed, den der Bot selbst abfragt. Der Nutzen liegt bei den Verteilern, die
+# der Bot sonst nicht bekommt (GlobeNewswire, AccessWire). Jede Meldung steht als wire_item mit der Quelle "wa-<verteiler>" im Protokoll; ob
 # sie wirklich früher kommt als die Feeds der Verteiler, zeigt die Wochenstatistik ("Nachrichtenquellen").
 # Bewertet und gehandelt wird, was in [wires] trade steht: seit 24.11.2026 die vier Verteiler (Entscheidung
 # Josh: gleich handeln). Kommt dieselbe Meldung auch über den Feed des Verteilers, zählt die erste.
@@ -242,13 +244,13 @@ sources = ["prnewswire", "businesswire", "globenewswire", "accesswire", "sec_edg
           # sec_edgar: Pflichtmitteilungen, wie WireAlpha sie meldet. Nur gemessen (zeigt, ob WireAlpha sie
           # früher sieht als der Bot selbst); gehandelt werden Pflichtmitteilungen über die Liste der SEC ([edgar])
 text_timeout_s = 3   # so lange auf den vollen Text einer Meldung warten; sonst wird die Überschrift allein bewertet
-# Adressen beim Dienst und wie der Schlüssel mitgeht. Voreingestellt ist, was die Dokumentation nennt; am 26.11.2026
-# kannte der Server diese Adressen nicht (404 und 403). tools/wirealpha_check.py sucht die richtigen und nennt
-# die Zeilen, die hier einzutragen sind:
-#   article     = "/v1/articles/{id}"       voller Text einer Meldung; ohne {id} die Liste der neuesten
-#   auth        = "bearer"                  bearer, header:<Name>, query:<name> oder none
-#   stream      = "/v1/ws?apiKey={key}"     der Strom; {key} wird durch den Schlüssel ersetzt
-#   stream_auth = "none"                    Schlüssel beim Strom zusätzlich als Kopfzeile: none, bearer, header:<Name>
+# Adressen beim Dienst und wie der Schlüssel mitgeht. Die Dokumentation nennt Adressen unter /v1, die der Server
+# nicht kennt (404 und 403). Die folgenden hat tools/wirealpha_check.py am 26.11.2026 auf dem Server gefunden;
+# ändert der Dienst sie, sucht das Werkzeug sie neu und nennt die Zeilen für hier.
+article     = "/api/v1/articles/{id}"       # voller Text einer Meldung; ohne {id} die Liste der neuesten
+auth        = "bearer"                      # bearer, header:<Name>, query:<name> oder none
+stream      = "/api/v1/ws?apiKey={key}"     # der Strom; {key} wird durch den Schlüssel ersetzt
+stream_auth = "none"                        # Schlüssel beim Strom zusätzlich als Kopfzeile: none, bearer, header:<Name>
 
 [edgar]
 # Pflichtmitteilungen an die US-Börsenaufsicht SEC (Formular 8-K). Jede wird mitgeschrieben (Messung).

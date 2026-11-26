@@ -24,7 +24,7 @@ bewertet nur Nachrichten, alles andere sind feste Regeln aus `config.toml`.
 | `bot/llm.py` | Nachrichtenbewertung über die Anthropic-API. Ein Modell entscheidet (`[llm] model`), weitere bewerten zum Vergleich mit (`shadow`); jedes Modell braucht eine eigene Form der Anfrage |
 | `bot/wires.py` | Pressemitteilungen von PR Newswire und Business Wire (seit 23.11.; GlobeNewswire ist eingebaut, weist den Server aber ab: 403), je Verteiler die Zuordnung zum Börsenkürzel; Haupt-Feeds alle 10 s, Themen-Feeds jede Minute (`[wires]`). Anlegeraufrufe von Kanzleien werden erkannt (`is_alert`), mit `alert` protokolliert und weder bewertet noch gemessen |
 | `bot/edgar.py` | Pflichtmitteilungen an die SEC (Formular 8-K): die Liste alle 2 Sekunden (`[edgar] fast_poll_s`, werktags 6:00 bis 17:40 Uhr New Yorker Zeit), jede Meldung mit Annahmezeit protokolliert. Frische Meldungen ohne Quartalszahlen gehen mit ihrem Text und dem der Anlage 99 an den Sofort-Einstieg: bewertet (`rate`) und gehandelt (`trade`) |
-| `bot/wirealpha.py` | Pressemitteilungen von WireAlpha (kostenlose Push-Verbindung, vom Anbieter „unter einer Sekunde“, ungeprüft), Quelle `wa-<verteiler>`. Die vier Verteiler werden gehandelt (`[wires] trade`), den vollen Text holt der Bot je Meldung nach; die SEC-Meldungen von WireAlpha werden nur gemessen. Läuft nur mit Schlüssel auf dem Server (`[wirealpha]`) |
+| `bot/wirealpha.py` | Pressemitteilungen von WireAlpha (kostenlose Push-Verbindung; „unter einer Sekunde“ laut Anbieter, nach seinen eigenen Angaben vom 26.11. bei PR Newswire aber rund zwei Minuten), Quelle `wa-<verteiler>`. Die vier Verteiler werden gehandelt (`[wires] trade`), den vollen Text holt der Bot je Meldung nach; die SEC-Meldungen von WireAlpha werden nur gemessen. Läuft nur mit Schlüssel auf dem Server (`[wirealpha]`) |
 | `bot/finnhub_news.py` | Nachrichten von Finnhub (kostenloses Konto); abgeschaltet seit 24.11.2026 (kam 13 bis 14 Minuten nach der Veröffentlichung, nie zuerst) |
 | `bot/first.py` | dieselbe Nachricht aus mehreren Quellen: nur die erste wird bewertet und gehandelt, jede spätere Kopie protokolliert (`news_dup`, mit Verspätung) |
 | `bot/alpaca.py`, `bot/market.py` | Alpaca-Zugriff, Handelszeiten, handelbare Aktien |
@@ -117,8 +117,8 @@ und man muss den Text lesen, um die Richtung zu erkennen (Zahlen: `memory/strate
 - **Pressemitteilungen:** PR Newswire (im Median 98 Sekunden zu spät) und Business Wire (rund 340 Sekunden)
   über ihre Feeds; GlobeNewswire weist den Server ab (403), nicht umgehen. Dazu WireAlpha per Push
   (PR Newswire, Business Wire, GlobeNewswire, AccessWire), sobald Josh den Schlüssel eingetragen hat;
-  ungeprüft ist, ob es wirklich in unter einer Sekunde liefert und wie gut seine Zuordnung zum Börsenkürzel
-  ist. Kommt dieselbe Nachricht mehrfach, zählt die erste.
+  ungeprüft ist, wie gut seine Zuordnung zum Börsenkürzel ist; schneller als die Feeds ist es bei PR Newswire
+  nicht (eigene Angabe: 126 Sekunden). Kommt dieselbe Nachricht mehrfach, zählt die erste.
 - **SEC-Pflichtmitteilungen:** Die Liste wird alle 2 Sekunden abgefragt; der Bot sieht eine Meldung damit
   rund 35 bis 60 Sekunden nach der Annahme statt nach fünf Minuten. Frische Meldungen (höchstens 10 Minuten
   alt, ohne Quartalszahlen, keine bloße Formalie) werden gelesen, bewertet und gehandelt (`fast_rated` mit
@@ -134,11 +134,12 @@ und man muss den Text lesen, um die Richtung zu erkennen (Zahlen: `memory/strate
   Stunden verspätet, jede siebte Meldung zur falschen Firma) und die Finnhub-Nachrichten.
 
 **Was noch fehlt**
-- Die Schlüssel von Alpha Vantage (25.11.) und WireAlpha (26.11.) liegen auf dem Server. WireAlpha läuft
-  trotzdem noch nicht: Die Adressen aus seiner Dokumentation kennt sein Server nicht (Abfrage 404, Strom
-  403), und die dort genannten Programmbibliotheken gibt es nicht. Die Adressen sind deshalb in `[wirealpha]`
-  einstellbar; `bash deploy/run-tool.sh tools/wirealpha_check.py` sucht die richtigen. Bis sie eingetragen
-  sind, versucht der Bot alle fünf Minuten vergeblich zu verbinden. WireAlpha ist am echten Dienst ungeprüft: nach dem ersten Tag `wirealpha_sample`, `wire_item` mit `wa-…`
+- Die Schlüssel von Alpha Vantage (25.11.) und WireAlpha (26.11.) liegen auf dem Server. Die Adressen aus
+  WireAlphas Dokumentation kennt sein Server nicht; die richtigen (unter `/api/v1`) hat
+  `tools/wirealpha_check.py` am 26.11. gefunden, sie stehen in `[wirealpha]`. Abfrage und Verbindung
+  funktionieren seitdem; eine Meldung über die Verbindung hat der Bot noch nicht gesehen (Feiertag), ihr
+  Format ist also noch die Annahme aus der Dokumentation. Schnell ist der Dienst nach eigener Angabe nicht
+  (PR Newswire: 126 Sekunden). Noch zu prüfen: nach dem ersten Tag `wirealpha_sample`, `wire_item` mit `wa-…`
   und die Zuordnung zum Börsenkürzel ansehen.
 - Abendliche Prüfung jeder Ausführung gegen den echten Umsatz (das Paper-Konto prüft die Ordergröße nicht
   gegen die verfügbare Menge; die Probe mit 1 Aktie zeigt den Kurs, nicht die Tiefe).
