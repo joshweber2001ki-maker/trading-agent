@@ -1,16 +1,16 @@
 {
- "t": "2026-11-27T17:06:13Z",
+ "t": "2026-11-27T18:06:18Z",
  "version": "5cf4b9fdb3a8ec7be8fd30854140f9412073a267",
  "day": "2026-11-27",
  "trading_day": true,
- "market_open": true,
+ "market_open": false,
  "news_stream": false,
  "llm_available": true,
  "llm_model": "claude-opus-5-5",
- "llm_calls_today": 11,
+ "llm_calls_today": 12,
  "llm_shadow_calls": {
-  "claude-haiku-5-5": 11,
-  "claude-sonnet-5-5": 11
+  "claude-haiku-5-5": 12,
+  "claude-sonnet-5-5": 12
  },
  "news": {
   "received": 62,
@@ -18,21 +18,21 @@
   "candidates": 0
  },
  "wires": {
-  "polls": 16403,
-  "items": 514,
+  "polls": 17901,
+  "items": 526,
   "matched": 108,
   "errors": 0
  },
  "wire_sources": {
   "prnewswire": {
-   "polls": 9836,
-   "items": 404,
+   "polls": 10734,
+   "items": 412,
    "matched": 104,
    "errors": 0
   },
   "businesswire": {
-   "polls": 6567,
-   "items": 110,
+   "polls": 7167,
+   "items": 114,
    "matched": 4,
    "errors": 0
   },
@@ -43,27 +43,27 @@
    "errors": 0
   },
   "wirealpha": {
-   "messages": 1576,
-   "items": 259,
+   "messages": 1712,
+   "items": 275,
    "matched": 60,
    "errors": 0,
    "connected": true
   }
  },
  "edgar": {
-  "polls": 6106,
-  "filings": 38,
-  "matched": 14,
-  "errors": 504,
-  "handed_on": 12,
+  "polls": 7061,
+  "filings": 43,
+  "matched": 16,
+  "errors": 605,
+  "handed_on": 14,
   "looks": 300,
   "median_s": 0.26,
-  "p90_s": 3.06
+  "p90_s": 2.61
  },
  "fast": {
-  "received": 35,
-  "rated": 11,
-  "candidates": 0,
+  "received": 37,
+  "rated": 12,
+  "candidates": 1,
   "entered": 0
  },
  "fast_enabled": true,
@@ -81,7 +81,7 @@
  "open_trades": [],
  "trades_today": 0,
  "errors_today": 0,
- "flattened": false,
- "phase": "regular",
+ "flattened": true,
+ "phase": "post",
  "extended": true
 }
