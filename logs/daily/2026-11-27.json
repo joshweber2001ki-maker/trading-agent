@@ -1,0 +1,35 @@
+{
+  "day": "2026-11-27",
+  "equity_start": 102110.17,
+  "equity_end": 102110.17,
+  "pnl": 0.0,
+  "basis": "day_start",
+  "trades": 0,
+  "news": {
+    "received": 66,
+    "classified": 0,
+    "candidates": 0
+  },
+  "wires": {
+    "polls": 23352,
+    "items": 550,
+    "matched": 113,
+    "errors": 0
+  },
+  "llm_model": "claude-opus-5-5",
+  "llm_calls": 20,
+  "llm_shadow_calls": {
+    "claude-haiku-5-5": 20,
+    "claude-sonnet-5-5": 20
+  },
+  "errors": 0,
+  "orb_watched": [],
+  "orb_traded": [],
+  "extended": true,
+  "fast": {
+    "received": 79,
+    "rated": 20,
+    "candidates": 1,
+    "entered": 0
+  }
+}
